@@ -844,7 +844,38 @@ function ScheduleTab({ tz, setTz, preset, applyPreset, selDays, selTimes, postsP
 // TAB 4: MONETIZE
 // ═══════════════════════════════════════════
 
+const SAAS_CATS = [
+  { id: 'all', label: '전체', icon: '◎' },
+  { id: 'AI글쓰기', label: 'AI 글쓰기', icon: '✎' },
+  { id: 'AI영상', label: 'AI 영상', icon: '▶' },
+  { id: 'AI음성', label: 'AI 음성', icon: '♪' },
+  { id: 'SEO', label: 'SEO', icon: '↗' },
+  { id: '이메일', label: '이메일', icon: '✉' },
+  { id: 'CRM', label: 'CRM', icon: '⊞' },
+  { id: '호스팅', label: '호스팅', icon: '⊡' },
+  { id: '클라우드', label: '클라우드', icon: '☁' },
+  { id: '디자인', label: '디자인', icon: '◆' },
+  { id: '생산성', label: '생산성', icon: '☰' },
+  { id: 'VPN', label: 'VPN', icon: '⊙' },
+  { id: '교육', label: '교육', icon: '⊕' },
+  { id: '금융', label: '금융', icon: '◈' },
+  { id: 'SNS관리', label: 'SNS', icon: '◉' },
+  { id: 'SaaS딜', label: 'SaaS딜', icon: '★' },
+];
+
 function MoneyTab({ affKeys, setAffKey, saas, updateSaas, addSaas, rmSaas }) {
+  const [saasCat, setSaasCat] = useState('all');
+  const filtered = saasCat === 'all' ? saas : saas.filter(s => s.cat === saasCat);
+  const connected = saas.filter(s => s.url).length;
+
+  // 카테고리별 연결 수
+  const catCounts = {};
+  saas.forEach(s => {
+    if (!catCounts[s.cat]) catCounts[s.cat] = { total: 0, on: 0 };
+    catCounts[s.cat].total++;
+    if (s.url) catCounts[s.cat].on++;
+  });
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
@@ -882,34 +913,76 @@ function MoneyTab({ affKeys, setAffKey, saas, updateSaas, addSaas, rmSaas }) {
         ))}
       </Card>
 
-      {/* SaaS Referrals */}
+      {/* SaaS Referrals — 카테고리 탭 */}
       <Card>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: '#1a1a2e' }}>🤖 AI SaaS 레퍼럴</div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#1a1a2e' }}>SaaS 레퍼럴</div>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{connected}/{saas.length}개 연결됨</div>
+          </div>
           <button onClick={addSaas} style={{
             padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.3)',
             background: 'rgba(99,102,241,0.04)', color: '#6366f1', fontSize: 11, fontWeight: 700, cursor: 'pointer'
           }}>+ 추가</button>
         </div>
-        {saas.map((s, i) => (
-          <div key={i} style={{
-            display: 'grid', gridTemplateColumns: '130px 70px 90px 1fr 32px',
-            gap: 8, alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f1f5f9'
-          }}>
-            <input value={s.name} onChange={e => updateSaas(i, 'name', e.target.value)} placeholder="서비스명"
-              style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#1a1a2e', fontSize: 11, outline: 'none' }} />
-            <input value={s.cat} onChange={e => updateSaas(i, 'cat', e.target.value)} placeholder="카테고리"
-              style={{ padding: '7px 8px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b', fontSize: 10, outline: 'none' }} />
-            <span style={{ fontSize: 10, color: '#10b981' }}>{s.comm}</span>
-            <input value={s.url} onChange={e => updateSaas(i, 'url', e.target.value)} placeholder="레퍼럴 URL"
-              style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#1a1a2e', fontSize: 11, outline: 'none' }} />
-            <button onClick={() => rmSaas(i)} style={{
-              width: 28, height: 28, borderRadius: 8, border: 'none',
-              background: 'rgba(239,68,68,0.06)', color: '#ef4444', fontSize: 14, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}>×</button>
+
+        {/* 카테고리 탭 */}
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 14, paddingBottom: 12, borderBottom: '1px solid #f1f5f9' }}>
+          {SAAS_CATS.filter(c => c.id === 'all' || catCounts[c.id]).map(c => {
+            const cnt = c.id === 'all' ? null : catCounts[c.id];
+            const isActive = saasCat === c.id;
+            return (
+              <button key={c.id} onClick={() => setSaasCat(c.id)} style={{
+                padding: '5px 10px', borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                border: isActive ? '1.5px solid #6366f1' : '1px solid #e2e8f0',
+                background: isActive ? 'rgba(99,102,241,0.06)' : '#fff',
+                color: isActive ? '#6366f1' : '#64748b',
+                display: 'flex', alignItems: 'center', gap: 4, transition: 'all 0.15s'
+              }}>
+                <span style={{ fontSize: 12 }}>{c.icon}</span>
+                {c.label}
+                {cnt && <span style={{
+                  fontSize: 9, padding: '1px 5px', borderRadius: 4, marginLeft: 2,
+                  background: cnt.on > 0 ? 'rgba(16,185,129,0.1)' : 'rgba(0,0,0,0.04)',
+                  color: cnt.on > 0 ? '#10b981' : '#94a3b8'
+                }}>{cnt.on}/{cnt.total}</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 필터된 SaaS 목록 */}
+        {filtered.map((s, fi) => {
+          const realIdx = saas.indexOf(s);
+          return (
+            <div key={realIdx} style={{
+              display: 'grid', gridTemplateColumns: '130px 70px 100px 1fr 32px',
+              gap: 8, alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f1f5f9'
+            }}>
+              <input value={s.name} onChange={e => updateSaas(realIdx, 'name', e.target.value)} placeholder="서비스명"
+                style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#1a1a2e', fontSize: 11, outline: 'none' }} />
+              <select value={s.cat} onChange={e => updateSaas(realIdx, 'cat', e.target.value)}
+                style={{ padding: '5px 4px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b', fontSize: 9, outline: 'none' }}>
+                {SAAS_CATS.filter(c => c.id !== 'all').map(c => (
+                  <option key={c.id} value={c.id}>{c.label}</option>
+                ))}
+              </select>
+              <span style={{ fontSize: 10, color: '#10b981', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.comm}</span>
+              <input value={s.url} onChange={e => updateSaas(realIdx, 'url', e.target.value)} placeholder="레퍼럴 URL"
+                style={{ padding: '7px 10px', borderRadius: 8, border: s.url ? '1px solid rgba(16,185,129,0.3)' : '1px solid #e2e8f0', background: s.url ? 'rgba(16,185,129,0.03)' : '#f8fafc', color: '#1a1a2e', fontSize: 11, outline: 'none' }} />
+              <button onClick={() => rmSaas(realIdx)} style={{
+                width: 28, height: 28, borderRadius: 8, border: 'none',
+                background: 'rgba(239,68,68,0.06)', color: '#ef4444', fontSize: 14, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}>×</button>
+            </div>
+          );
+        })}
+        {filtered.length === 0 && (
+          <div style={{ textAlign: 'center', padding: 20, color: '#94a3b8', fontSize: 12 }}>
+            이 카테고리에 등록된 서비스가 없습니다.
           </div>
-        ))}
+        )}
       </Card>
     </div>
   );
