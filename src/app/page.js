@@ -303,6 +303,27 @@ export default function Dashboard() {
   const { sites } = useSites();
   const { config: savedConfig, saveConfig } = useDashboardConfig();
   const [configLoaded, setConfigLoaded] = useState(false);
+  const [showAddSite, setShowAddSite] = useState(false);
+  const [newSiteName, setNewSiteName] = useState('');
+  const [newSiteDomain, setNewSiteDomain] = useState('');
+
+  const addSite = async () => {
+    if (!newSiteName || !newSiteDomain) return;
+    const id = 'site-' + (sites.length + 1);
+    await supabase.from('sites').insert({
+      id, name: newSiteName, domain: newSiteDomain,
+      wp_url: '', niche: 'general', status: 'active', daily_target: 5,
+      config: {}
+    });
+    setNewSiteName(''); setNewSiteDomain('');
+    setShowAddSite(false); setSelectedSite(id);
+  };
+
+  const deleteSite = async (id) => {
+    if (sites.length <= 1) return;
+    await supabase.from('sites').delete().eq('id', id);
+    setSelectedSite(sites.find(s => s.id !== id)?.id || 'site-1');
+  };
 
   // Niche
   const [selNiches, setSelNiches] = useState(['ai-tools']);
@@ -415,16 +436,28 @@ export default function Dashboard() {
                 <Badge text={`${connectedAff}개 수익화`} color="green" />
                 <Badge text={lang.toUpperCase()} color="blue" />
               </div>
-              <select
-                value={selectedSite} onChange={e => setSelectedSite(e.target.value)}
-                style={{
-                  background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
-                  padding: '8px 14px', color: '#1a1a2e', fontSize: 12, fontWeight: 500,
-                  cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
-                }}
-              >
-                {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <select
+                  value={selectedSite} onChange={e => setSelectedSite(e.target.value)}
+                  style={{
+                    background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
+                    padding: '8px 14px', color: '#1a1a2e', fontSize: 12, fontWeight: 500,
+                    cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
+                  }}
+                >
+                  {sites.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} {s.status === 'paused' ? '(중단)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <button onClick={() => setShowAddSite(!showAddSite)} style={{
+                  width: 32, height: 32, borderRadius: 8, border: '1px solid #e2e8f0',
+                  background: showAddSite ? '#6366f1' : '#fff', color: showAddSite ? '#fff' : '#6366f1',
+                  fontSize: 16, fontWeight: 700, cursor: 'pointer', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center'
+                }}>+</button>
+              </div>
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 6,
                 background: 'rgba(16,185,129,0.08)', padding: '5px 12px', borderRadius: 20
@@ -455,6 +488,33 @@ export default function Dashboard() {
       </header>
 
       {/* ── Content ── */}
+      {/* 사이트 추가 패널 */}
+      {showAddSite && (
+        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '12px 24px 0' }}>
+          <Card style={{ display: 'flex', alignItems: 'flex-end', gap: 12, padding: 16 }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 11, color: '#94a3b8', display: 'block', marginBottom: 4 }}>사이트 이름</label>
+              <InputField value={newSiteName} onChange={setNewSiteName} placeholder="예: 내 블로그" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 11, color: '#94a3b8', display: 'block', marginBottom: 4 }}>도메인</label>
+              <InputField value={newSiteDomain} onChange={setNewSiteDomain} placeholder="예: myblog.com" />
+            </div>
+            <button onClick={addSite} disabled={!newSiteName || !newSiteDomain} style={{
+              padding: '9px 20px', borderRadius: 10, border: 'none', background: '#6366f1',
+              color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+              opacity: (!newSiteName || !newSiteDomain) ? 0.4 : 1
+            }}>추가</button>
+            {sites.length > 1 && (
+              <button onClick={() => { if (confirm(`"${sites.find(s=>s.id===selectedSite)?.name}" 사이트를 삭제하시겠습니까?`)) deleteSite(selectedSite); }} style={{
+                padding: '9px 16px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.3)',
+                background: 'rgba(239,68,68,0.04)', color: '#ef4444', fontSize: 12, fontWeight: 700, cursor: 'pointer'
+              }}>현재 사이트 삭제</button>
+            )}
+          </Card>
+        </div>
+      )}
+
       <main style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 24px 60px' }}>
         {tab === 'dash' && <DashTab {...sharedProps} />}
         {tab === 'logs' && <PostsTab siteId={selectedSite} />}
@@ -1205,20 +1265,25 @@ function SettingsTab({ siteId, sites }) {
   const site = sites.find(s => s.id === siteId);
   const [draftModel, setDraftModel] = useState('deepseek-chat');
   const [polishModel, setPolishModel] = useState('claude-sonnet-4-20250514');
+  const cfg = site?.config || {};
   const [siteName, setSiteName] = useState(site?.name || '');
   const [domain, setDomain] = useState(site?.domain || '');
   const [wpUrl, setWpUrl] = useState(site?.wp_url || '');
+  const [wpUser, setWpUser] = useState(cfg.wp_username || '');
+  const [wpPass, setWpPass] = useState(cfg.wp_app_password || '');
   const [target, setTarget] = useState(site?.daily_target || 10);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [paused, setPaused] = useState(site?.status === 'paused');
 
-  // 사이트 변경 시 필드 동기화
   useEffect(() => {
     if (site) {
+      const c = site.config || {};
       setSiteName(site.name || '');
       setDomain(site.domain || '');
       setWpUrl(site.wp_url || '');
+      setWpUser(c.wp_username || '');
+      setWpPass(c.wp_app_password || '');
       setTarget(site.daily_target || 10);
       setPaused(site.status === 'paused');
     }
@@ -1236,6 +1301,7 @@ function SettingsTab({ siteId, sites }) {
       wp_url: wpUrl,
       daily_target: target,
       status: paused ? 'paused' : 'active',
+      config: { ...cfg, wp_username: wpUser, wp_app_password: wpPass },
       ai_config: { draft_model: draftModel, polish_model: polishModel },
       updated_at: new Date().toISOString()
     }).eq('id', siteId);
@@ -1358,7 +1424,25 @@ function SettingsTab({ siteId, sites }) {
               style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10,
                 padding: '10px 14px', color: '#1a1a2e', fontSize: 13, width: '100%', fontWeight: 500, outline: 'none',
                 fontFamily: 'monospace' }} />
-            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4 }}>GitHub Secrets의 WP_URL과 동일하게 입력하세요</div>
+            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4 }}>예: https://example.com/wp-json/wp/v2</div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginBottom: 6, fontWeight: 500 }}>WP 사용자명</label>
+              <input value={wpUser} onChange={e => setWpUser(e.target.value)} placeholder="admin"
+                style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10,
+                  padding: '10px 14px', color: '#1a1a2e', fontSize: 13, width: '100%', fontWeight: 500, outline: 'none' }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginBottom: 6, fontWeight: 500 }}>WP 앱 비밀번호</label>
+              <input value={wpPass} onChange={e => setWpPass(e.target.value)} placeholder="xxxx xxxx xxxx xxxx" type="password"
+                style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10,
+                  padding: '10px 14px', color: '#1a1a2e', fontSize: 13, width: '100%', fontWeight: 500, outline: 'none',
+                  fontFamily: 'monospace' }} />
+            </div>
+          </div>
+          <div style={{ fontSize: 10, color: '#f59e0b', background: 'rgba(245,158,11,0.06)', padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(245,158,11,0.12)' }}>
+            멀티사이트 모드: 사이트별 WP 인증정보가 여기에 저장됩니다. GitHub Secrets의 WP 인증정보는 폴백으로 사용됩니다.
           </div>
           <div>
             <label style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginBottom: 6, fontWeight: 500 }}>일일 발행 목표</label>

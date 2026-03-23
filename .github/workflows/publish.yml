@@ -64,17 +64,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run AutoBlog Engine
+      - name: Run AutoBlog Engine (all sites)
         run: |
           COUNT="${{ github.event.inputs.count || '3' }}"
           DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
           PIPELINE="${{ github.event.inputs.pipeline || 'autoblog' }}"
-          
-          ARGS="--count $COUNT --pipeline $PIPELINE"
+
+          ARGS="--all-sites --count $COUNT --pipeline $PIPELINE"
           if [ "$DRY_RUN" = "true" ]; then
             ARGS="$ARGS --dry-run"
           fi
-          
+
           python scripts/main.py $ARGS
 
       - name: Commit used keywords

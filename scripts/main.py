@@ -1146,14 +1146,15 @@ def extract_title(content):
     return "자동 생성 글", content
 
 
-def _get_site_config():
-    """Supabase에서 사이트 설정 조회 (daily_target, status)"""
+def _get_site_config(site_id=None):
+    """Supabase에서 사이트 설정 조회"""
     if not SUPABASE_URL or not SUPABASE_KEY:
         return None
     import requests
     try:
+        sid = site_id or SITE_ID
         resp = requests.get(
-            f"{SUPABASE_URL}/rest/v1/sites?id=eq.{SITE_ID}",
+            f"{SUPABASE_URL}/rest/v1/sites?id=eq.{sid}",
             headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
             timeout=10
         )
@@ -1165,33 +1166,62 @@ def _get_site_config():
     return None
 
 
-def run_pipeline(count=5, dry_run=False, pipeline="autoblog"):
-    # Supabase에서 사이트 설정 조회
-    site_config = _get_site_config()
-    if site_config:
-        # 일시정지 상태 확인
-        if site_config.get("status") == "paused":
-            log.info("이 사이트는 일시정지 상태입니다. 발행을 건너뜁니다.")
-            return
+def _get_all_active_sites():
+    """Supabase에서 active 상태인 모든 사이트 조회"""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return []
+    import requests
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/sites?status=eq.active&order=created_at",
+            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+            timeout=10
+        )
+        return resp.json() or []
+    except Exception:
+        return []
 
-        # 대시보드에서 설정한 daily_target 사용 (CLI 기본값일 때만)
+
+def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None):
+    """단일 사이트 파이프라인. site_override가 있으면 해당 사이트 설정 사용."""
+    global SITE_ID, WP_URL, WP_USER, WP_PASS
+
+    # 사이트 설정 로드
+    if site_override:
+        # 멀티사이트 모드: Supabase에서 가져온 사이트 설정 적용
+        SITE_ID = site_override["id"]
+        WP_URL = site_override.get("wp_url", "")
+        cfg = site_override.get("config") or {}
+        WP_USER = cfg.get("wp_username", WP_USER)
+        WP_PASS = cfg.get("wp_app_password", WP_PASS)
+        site_config = site_override
+    else:
+        site_config = _get_site_config()
+
+    if site_config:
+        if site_config.get("status") == "paused":
+            log.info(f"[{SITE_ID}] 일시정지 상태 — 스킵")
+            return
         db_target = site_config.get("daily_target")
-        if db_target and count == 5:  # 5는 CLI 기본값
+        if db_target and count == 5:
             count = db_target
-            log.info(f"  Supabase daily_target 적용: {count}편")
+
+    if not WP_URL:
+        log.error(f"[{SITE_ID}] WP_URL 없음 — 스킵")
+        return
 
     log.info("=" * 60)
-    log.info(f"AutoBlog Engine v6.0 시작 — {count}편 발행 예정")
+    log.info(f"AutoBlog Engine v6.0 — [{SITE_ID}] {count}편 발행")
+    log.info(f"  WP: {WP_URL}")
     log.info(f"  파이프라인: {pipeline} | 드라이런: {dry_run}")
-    log.info(f"  사이트: {WP_URL}")
     log.info(f"  이미지: Pexels{'(O)' if PEXELS_KEY else '(X)'} → "
              f"Pixabay{'(O)' if PIXABAY_KEY else '(X)'} → "
              f"Unsplash{'(O)' if UNSPLASH_KEY else '(X)'}")
     log.info(f"  네이버 카페: {'(O)' if NAVER_REFRESH_TOKEN else '(X)'}")
     log.info("=" * 60)
 
-    # API 상태 체크 (매 실행 시)
-    check_api_status()
+    if not site_override:
+        check_api_status()
 
     km = KeywordManager()
     cg = ContentGenerator()
@@ -1343,13 +1373,59 @@ def _git_commit_used():
 
 
 # ═══════════════════════════════════════════════════════
+# 멀티사이트 실행
+# ═══════════════════════════════════════════════════════
+def run_all_sites(count=5, dry_run=False, pipeline="autoblog"):
+    """Supabase에서 모든 active 사이트를 조회하고 순차적으로 파이프라인 실행"""
+    check_api_status()
+
+    sites = _get_all_active_sites()
+    if not sites:
+        log.error("active 상태인 사이트가 없습니다.")
+        return
+
+    log.info("=" * 60)
+    log.info(f"멀티사이트 모드 — {len(sites)}개 사이트")
+    for s in sites:
+        log.info(f"  [{s['id']}] {s.get('name', '?')} ({s.get('domain', '?')})")
+    log.info("=" * 60)
+
+    for site in sites:
+        cfg = site.get("config") or {}
+        wp_url = site.get("wp_url", "")
+        wp_user = cfg.get("wp_username", "")
+        wp_pass = cfg.get("wp_app_password", "")
+
+        if not wp_url or not wp_user or not wp_pass:
+            log.warning(f"[{site['id']}] WP 인증정보 미설정 — 스킵")
+            log.warning(f"  대시보드 설정 탭에서 WP URL/인증정보를 입력하세요")
+            continue
+
+        log.info(f"\n{'#'*60}")
+        log.info(f"# 사이트: [{site['id']}] {site.get('name', '')}")
+        log.info(f"{'#'*60}")
+
+        try:
+            run_pipeline(count=count, dry_run=dry_run, pipeline=pipeline, site_override=site)
+        except Exception as e:
+            log.error(f"[{site['id']}] 파이프라인 오류: {e}")
+
+    _git_commit_used()
+    log.info(f"\n{'='*60}")
+    log.info(f"멀티사이트 실행 완료 — {len(sites)}개 사이트 처리")
+    log.info(f"{'='*60}")
+
+
+# ═══════════════════════════════════════════════════════
 # CLI
 # ═══════════════════════════════════════════════════════
 def main():
     parser = argparse.ArgumentParser(description="AutoBlog Engine v6.0")
-    parser.add_argument("--count", type=int, default=5, help="발행 편수")
+    parser.add_argument("--count", type=int, default=5, help="발행 편수 (사이트별)")
     parser.add_argument("--dry-run", action="store_true", help="발행 없이 테스트")
     parser.add_argument("--pipeline", default="autoblog", help="파이프라인 (autoblog/hotdeal/promo)")
+    parser.add_argument("--all-sites", action="store_true", help="Supabase 등록된 모든 active 사이트에 발행")
+    parser.add_argument("--site-id", default="", help="특정 사이트 ID 지정 (기본: SITE_ID 환경변수)")
     parser.add_argument("--setup-pages", action="store_true", help="AdSense 필수 페이지 자동 생성")
     parser.add_argument("--check-status", action="store_true", help="API 연결 상태 체크 → Supabase 기록")
     parser.add_argument("--site-name", default="", help="사이트 이름 (필수 페이지용)")
@@ -1366,21 +1442,35 @@ def main():
         if not WP_URL or not WP_USER or not WP_PASS:
             log.error("WP_URL, WP_USERNAME, WP_APP_PASSWORD 환경변수 필요")
             sys.exit(1)
-        log.info("=" * 60)
-        log.info("AdSense 필수 페이지 자동 생성")
-        log.info("=" * 60)
         epc = EssentialPagesCreator()
-        created, skipped, failed = epc.create_all(site_name=args.site_name, email=args.email)
-        sys.exit(0 if not failed else 1)
+        epc.create_all(site_name=args.site_name, email=args.email)
+        sys.exit(0)
 
-    # 일반 발행 모드
-    if not WP_URL:
-        log.error("WP_URL 환경변수 없음")
-        sys.exit(1)
     if not (DEEPSEEK_KEY or GROK_KEY or GEMINI_KEY):
         log.error("AI API 키가 하나도 없음 (DEEPSEEK/GROK/GEMINI 중 1개 필요)")
         sys.exit(1)
 
+    # 멀티사이트 모드
+    if args.all_sites:
+        run_all_sites(count=args.count, dry_run=args.dry_run, pipeline=args.pipeline)
+        return
+
+    # 특정 사이트 지정
+    if args.site_id:
+        global SITE_ID
+        SITE_ID = args.site_id
+        site = _get_site_config(args.site_id)
+        if site:
+            run_pipeline(count=args.count, dry_run=args.dry_run, pipeline=args.pipeline, site_override=site)
+        else:
+            log.error(f"사이트 '{args.site_id}' 를 찾을 수 없습니다.")
+            sys.exit(1)
+        return
+
+    # 단일 사이트 모드 (환경변수 기반)
+    if not WP_URL:
+        log.error("WP_URL 환경변수 없음. --all-sites 또는 --site-id를 사용하세요.")
+        sys.exit(1)
     run_pipeline(count=args.count, dry_run=args.dry_run, pipeline=args.pipeline)
 
 
