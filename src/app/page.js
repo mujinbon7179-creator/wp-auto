@@ -1,6 +1,6 @@
 'use client';
-import { useState, useCallback } from 'react';
-import { useSites, useTodayStats, useRecentPosts, useMonthlyRevenue, useMonthlyCosts, useAlerts, usePublishTrend } from '@/lib/hooks';
+import { useState, useCallback, useEffect } from 'react';
+import { useSites, useTodayStats, useRecentPosts, useMonthlyRevenue, useMonthlyCosts, useAlerts, usePublishTrend, useDashboardConfig } from '@/lib/hooks';
 import { supabase, isConfigured } from '@/lib/supabase';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 
@@ -145,6 +145,7 @@ const POLISH_MODELS = [
 
 const TABS = [
   { id: 'dash', label: '대시보드', icon: '◎' },
+  { id: 'logs', label: '발행 로그', icon: '⊞' },
   { id: 'niche', label: '니치 선택', icon: '◉' },
   { id: 'schedule', label: '스케줄', icon: '◷' },
   { id: 'money', label: '수익화', icon: '↗' },
@@ -300,6 +301,8 @@ export default function Dashboard() {
   const [tab, setTab] = useState('dash');
   const [selectedSite, setSelectedSite] = useState('site-1');
   const { sites } = useSites();
+  const { config: savedConfig, saveConfig } = useDashboardConfig();
+  const [configLoaded, setConfigLoaded] = useState(false);
 
   // Niche
   const [selNiches, setSelNiches] = useState(['ai-tools']);
@@ -345,6 +348,36 @@ export default function Dashboard() {
   const connectedAff = Object.values(affKeys).filter(Boolean).length + saas.filter(s => s.url).length;
   const connectedApi = Object.values(apiKeys).filter(Boolean).length;
   const snsCount = Object.values(snsOn).filter(Boolean).length;
+
+  // Supabase에서 저장된 설정 로드 (최초 1회)
+  useEffect(() => {
+    if (savedConfig && !configLoaded) {
+      if (savedConfig.selNiches) setSelNiches(savedConfig.selNiches);
+      if (savedConfig.tz) setTz(savedConfig.tz);
+      if (savedConfig.preset) setPreset(savedConfig.preset);
+      if (savedConfig.selDays) setSelDays(savedConfig.selDays);
+      if (savedConfig.selTimes) setSelTimes(savedConfig.selTimes);
+      if (savedConfig.postsPerRun) setPostsPerRun(savedConfig.postsPerRun);
+      if (savedConfig.affKeys) setAffKeys(savedConfig.affKeys);
+      if (savedConfig.adChecks) setAdChecks(savedConfig.adChecks);
+      if (savedConfig.lang) setLang(savedConfig.lang);
+      if (savedConfig.autoMode !== undefined) setAutoMode(savedConfig.autoMode);
+      if (savedConfig.snsOn) setSnsOn(savedConfig.snsOn);
+      setConfigLoaded(true);
+    }
+  }, [savedConfig, configLoaded]);
+
+  // 설정 변경 시 Supabase에 자동 저장 (디바운스)
+  useEffect(() => {
+    if (!configLoaded) return;
+    const timer = setTimeout(() => {
+      saveConfig({
+        selNiches, tz, preset, selDays, selTimes, postsPerRun,
+        affKeys, adChecks, lang, autoMode, snsOn
+      });
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [selNiches, tz, preset, selDays, selTimes, postsPerRun, affKeys, adChecks, lang, autoMode, snsOn, configLoaded, saveConfig]);
 
   if (!isConfigured) return <SetupGuide />;
 
@@ -424,6 +457,7 @@ export default function Dashboard() {
       {/* ── Content ── */}
       <main style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 24px 60px' }}>
         {tab === 'dash' && <DashTab {...sharedProps} />}
+        {tab === 'logs' && <PostsTab siteId={selectedSite} />}
         {tab === 'niche' && <NicheTab {...sharedProps} />}
         {tab === 'schedule' && <ScheduleTab {...sharedProps} />}
         {tab === 'money' && <MoneyTab {...sharedProps} />}
@@ -1342,6 +1376,90 @@ function AdminTab({ autoMode, setAutoMode, selNiches, connectedAff, connectedApi
           <Toggle on={autoMode} set={setAutoMode} />
         </div>
         <div style={{ fontSize: 12, color: '#94a3b8' }}>ON: CSV 소진 시 Trends+Reddit+AI에서 키워드 자동 발굴</div>
+      </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════
+// TAB: PUBLISH LOGS (품질 점수 포함)
+// ═══════════════════════════════════════════
+
+function PostsTab({ siteId }) {
+  const { posts, loading } = useRecentPosts(siteId, 50);
+
+  function qualityColor(score) {
+    if (score >= 80) return '#10b981';
+    if (score >= 70) return '#f59e0b';
+    return '#ef4444';
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 800, color: '#1a1a2e' }}>발행 로그 ({posts.length}건)</h2>
+      <Card>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
+                {['시간', '제목', '품질', '파이프라인', '키워드', '길이', '이미지', '쿠팡', '상태'].map(h => (
+                  <th key={h} style={{
+                    textAlign: 'left', padding: '12px 8px', color: '#94a3b8',
+                    fontWeight: 600, fontSize: 11, letterSpacing: 0.5
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {posts.map(p => (
+                <tr key={p.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <td style={{ padding: '12px 8px', whiteSpace: 'nowrap', color: '#94a3b8', fontSize: 12 }}>
+                    {new Date(p.published_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                  </td>
+                  <td style={{ padding: '12px 8px', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {p.url ? (
+                      <a href={p.url} target="_blank" rel="noopener noreferrer" style={{ color: '#6366f1', textDecoration: 'none', fontWeight: 500 }}>{p.title}</a>
+                    ) : p.title}
+                  </td>
+                  <td style={{ padding: '12px 8px' }}>
+                    {p.quality_score > 0 ? (
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        padding: '3px 10px', borderRadius: 8, fontSize: 12, fontWeight: 700,
+                        background: `${qualityColor(p.quality_score)}12`,
+                        color: qualityColor(p.quality_score)
+                      }}>
+                        {p.quality_score}
+                      </span>
+                    ) : (
+                      <span style={{ color: '#cbd5e1', fontSize: 11 }}>—</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '12px 8px' }}><Badge text={p.pipeline || 'autoblog'} color="purple" /></td>
+                  <td style={{ padding: '12px 8px', color: '#4a5568', fontSize: 12 }}>{p.keyword?.slice(0, 18)}</td>
+                  <td style={{ padding: '12px 8px', fontVariantNumeric: 'tabular-nums' }}>{fmt(p.content_length)}</td>
+                  <td style={{ padding: '12px 8px', textAlign: 'center' }}>
+                    {p.has_image ? (
+                      <span style={{ fontSize: 10, color: '#10b981', fontWeight: 600 }}>{p.image_tier || 'O'}</span>
+                    ) : (
+                      <span style={{ color: '#cbd5e1' }}>—</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '12px 8px', textAlign: 'center' }}>
+                    {p.has_coupang ? <span style={{ color: '#10b981' }}>O</span> : <span style={{ color: '#cbd5e1' }}>—</span>}
+                  </td>
+                  <td style={{ padding: '12px 8px' }}>
+                    <Badge text={p.status} color={p.status === 'published' ? 'green' : p.status === 'failed' ? 'red' : 'yellow'} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {loading && <LoadingState />}
+          {!loading && posts.length === 0 && (
+            <EmptyState text="발행 로그가 없습니다. GitHub Actions 발행 후 자동 기록됩니다." />
+          )}
+        </div>
       </Card>
     </div>
   );

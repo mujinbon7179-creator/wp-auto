@@ -235,3 +235,36 @@ export function usePublishTrend(siteId, days = 7) {
 
   return { trend, loading };
 }
+
+// ── 대시보드 설정 (Supabase 영속화) ──
+export function useDashboardConfig() {
+  const [config, setConfig] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetch() {
+      const { data } = await supabase
+        .from('dashboard_config')
+        .select('*')
+        .eq('id', 'global')
+        .single();
+      setConfig(data?.settings || {});
+      setLoading(false);
+    }
+    fetch();
+  }, []);
+
+  const saveConfig = useCallback(async (newSettings) => {
+    const merged = { ...(config || {}), ...newSettings };
+    setConfig(merged);
+    await supabase
+      .from('dashboard_config')
+      .upsert({
+        id: 'global',
+        settings: merged,
+        updated_at: new Date().toISOString()
+      });
+  }, [config]);
+
+  return { config, loading, saveConfig };
+}
