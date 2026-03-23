@@ -2,11 +2,8 @@ name: AutoBlog Publish
 
 on:
   schedule:
-    # KST 기준: 07:00, 12:00, 17:00, 22:00 (UTC: 22:00, 03:00, 08:00, 13:00)
-    - cron: '0 22 * * *'   # KST 07:00
-    - cron: '0 3 * * *'    # KST 12:00
-    - cron: '0 8 * * *'    # KST 17:00
-    - cron: '0 13 * * *'   # KST 22:00
+    # 30분 간격 실행 — 대시보드 스케줄 게이트가 실제 발행 여부 판단
+    - cron: '0,30 * * * *'
   workflow_dispatch:
     inputs:
       count:
@@ -48,6 +45,9 @@ jobs:
       NAVER_REFRESH_TOKEN: ${{ secrets.NAVER_REFRESH_TOKEN }}
       NAVER_CAFE_CLUBID: ${{ secrets.NAVER_CAFE_CLUBID }}
       NAVER_CAFE_MENUID: ${{ secrets.NAVER_CAFE_MENUID }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       SITE_ID: site-1
 
     steps:
@@ -64,7 +64,22 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Schedule gate check
+        id: gate
+        run: |
+          # 수동 실행(workflow_dispatch)이면 게이트 스킵
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "skip=false" >> $GITHUB_OUTPUT
+          else
+            python -c "
+from scripts.main import should_run_now
+import sys
+sys.exit(0 if should_run_now() else 1)
+" && echo "skip=false" >> $GITHUB_OUTPUT || echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Run AutoBlog Engine (all sites)
+        if: steps.gate.outputs.skip != 'true'
         run: |
           COUNT="${{ github.event.inputs.count || '3' }}"
           DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"

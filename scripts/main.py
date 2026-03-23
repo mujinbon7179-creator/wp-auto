@@ -247,10 +247,25 @@ class DynamicKeywordGenerator:
 
     def generate(self, count=5):
         """선택된 니치에서 다양한 키워드 동적 생성"""
+        # autoMode 체크
+        if SUPABASE_URL and SUPABASE_KEY:
+            import requests as _req
+            try:
+                _r = _req.get(f"{SUPABASE_URL}/rest/v1/dashboard_config?id=eq.global",
+                             headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}, timeout=10)
+                _rows = _r.json()
+                if _rows and len(_rows) > 0:
+                    _s = _rows[0].get("settings", {})
+                    if _s.get("autoMode") is False:
+                        log.info("  autoMode OFF — 정적 키워드 사용")
+                        return None
+            except Exception:
+                pass
+
         niches = self._get_dashboard_niches()
         if not niches:
             log.info("  대시보드 니치 미선택 — 정적 키워드 폴백")
-            return None  # 폴백: 기존 KeywordManager 사용
+            return None
 
         log.info(f"  동적 키워드 생성 — 니치: {niches}")
 
@@ -375,53 +390,186 @@ class DynamicKeywordGenerator:
 # 2. AI 글 생성 — 멀티모델 라우팅 + AdSense 최적화 프롬프트
 # ═══════════════════════════════════════════════════════
 
-DRAFT_PROMPT = """당신은 한국 최고의 전문 블로거입니다.
-10년 경력의 전문 필진처럼 깊이 있고 실용적인 글을 씁니다.
+# ── 한국어 프롬프트 (소비자 중심) ──
+DRAFT_PROMPT_KO = """당신은 이 분야를 직접 경험하고 연구한 전문가입니다.
+독자가 검색한 고민을 완벽히 해결하는 글을 씁니다.
 
 키워드: {keyword}
 검색의도: {intent}
 카테고리: {category}
 고유코드: {unique_seed}
 
-=== 작성 규칙 (AdSense 승인 최적화) ===
-1. 제목: 호기심+구체성 (숫자, 비교, 의문문 활용). <title> 태그로 감싸기
-2. 도입부: 3~4문장, 독자 고민을 정확히 짚고 "이 글을 읽으면 ~를 알 수 있다" 약속
-3. 본문: H2 소제목 5~7개, 각 소제목 아래 본문 300~500자
-   - 구체적 수치·비교표·실제 사례 필수 (숫자 없는 문단 금지)
-   - "~입니다", "~한 것입니다" 같은 딱딱한 종결 금지 → 대화체
-   - 핵심 포인트는 <strong> 강조 (최소 5개)
-   - 각 H2 섹션 사이에 충분한 내용 (광고 배치를 위한 자연스러운 문단 분리)
-4. 마무리: 핵심 3줄 요약 + 구체적 행동 유도 (CTA)
-5. 톤: 친근하되 전문적, "여러분" 호칭, 이모지 자제
-6. 분량: 4,000~7,000자 (충분히 상세하게)
-7. 키워드 배치: H2 2~3개에 키워드 자연스럽게 포함, 도입부·마무리에도 1회씩
+=== 핵심 원칙: 독자 만족 최우선 ===
+1. 제목: 독자의 실제 고민을 정확히 반영하는 제목. <title> 태그로 감싸기
+   - "이걸 읽으면 내 문제가 해결되겠다"라는 확신을 주는 제목
+2. 도입부: 3~4문장. 독자의 상황을 정확히 공감하고, 이 글이 줄 수 있는 가치를 약속
+3. 본문: H2 소제목 5~7개, 각 소제목 아래 300~500자
+   - 모든 주장에 구체적 수치/비교/출처 포함 (근거 없는 문장 금지)
+   - 독자가 바로 실행할 수 있는 구체적 액션 아이템 포함
+   - 다른 블로그에서 찾기 어려운 독자적 인사이트 1개 이상
+   - <strong> 태그로 핵심 정보 강조 (최소 5개)
+4. 마무리: 핵심 3줄 요약 + "지금 바로 할 수 있는 것" 구체적 안내
+5. 톤: 친구에게 설명하듯 자연스럽고 따뜻한 대화체
+   - "~입니다", "~한 것입니다" 같은 딱딱한 문체 금지
+   - 독자를 존중하되 격식체보다 친근체
+6. 분량: 4,000~7,000자 (빈 내용 없이 알차게)
+7. 구성: 읽기 쉬운 깔끔한 정리 + 논리적 전개
+   - 짧은 문단, 충분한 여백, 핵심 볼드 처리
+   - 비교표(<table>)나 목록(<ul>/<ol>) 적극 활용
 
-=== HTML 구조 규칙 ===
-- <title>글제목</title>을 콘텐츠 최상단에
-- 본문은 <h2>, <p>, <strong>, <ul>/<ol> 태그만 사용
-- <h1> 태그 사용 금지 (워드프레스가 자동 생성)
-- 각 <p> 태그는 2~4문장으로 구성 (너무 길거나 짧지 않게)
-- H2 사이 최소 2개 <p> 태그 확보 (광고 삽입 공간)
+=== HTML 규칙 ===
+- <title>글제목</title>을 최상단에
+- <h2>, <p>, <strong>, <ul>/<ol>, <table> 사용
+- <h1> 금지 (워드프레스 자동 생성)
+- 각 <p>는 2~4문장, H2 사이 최소 2개 <p>
 """
 
-POLISH_PROMPT = """아래 블로그 초안을 프리미엄 품질로 업그레이드하세요.
+POLISH_PROMPT_KO = """아래 블로그 초안을 독자가 감동할 수준으로 업그레이드하세요.
 
 키워드: {keyword}
 
 업그레이드 규칙:
-1. AI 특유 표현 완전 제거: "다양한", "중요합니다", "살펴보겠습니다", "알아보겠습니다"
-   → 자연스러운 구어체로 100% 교체
-2. 모든 문단에 최소 1개 구체적 수치/사례/비교 추가
-3. 문장 길이 변주: 짧은 문장(5어절)과 긴 문장(15어절) 혼합
-4. 읽는 리듬감: 질문→답변, 문제→해결, 비교→추천 패턴
-5. SEO: 키워드를 H2, 도입부, 마무리에 자연스럽게 포함
-6. HTML 구조 100% 유지, 내용만 퀄리티업
-7. <strong> 태그 최소 5개 이상 사용
-8. 4,000자 미만이면 내용을 보강하여 4,000자 이상으로
+1. AI 특유 표현 완전 제거:
+   "다양한", "중요합니다", "살펴보겠습니다", "알아보겠습니다", "관심이 높아지고 있습니다"
+   → 실제 사람이 쓴 것처럼 자연스러운 구어체로 100% 교체
+2. 모든 문단에 구체적 수치/사례/비교 1개 이상 추가 (빈 주장 금지)
+3. 문장 리듬: 짧은 문장(5어절)과 긴 문장(15어절) 혼합
+4. 독자 공감: 질문→답변, 문제→해결 패턴으로 몰입감
+5. 키워드를 H2 2~3개, 도입부, 마무리에 자연스럽게 배치
+6. HTML 구조 유지, 내용만 퀄리티업
+7. <strong> 최소 5개 이상
+8. 4,000자 미만이면 실용적 정보를 보강하여 4,000자 이상으로
 
 초안:
 {draft}
 """
+
+# ── 영문 프롬프트 (Consumer-first) ──
+DRAFT_PROMPT_EN = """You are a hands-on expert who has personally researched and tested everything in this topic.
+Write for a reader who Googled this problem and needs a real, actionable answer.
+
+Keyword: {keyword}
+Search Intent: {intent}
+Category: {category}
+Unique Code: {unique_seed}
+
+=== Core Principle: Reader Value First ===
+1. Title: Address the reader's actual problem. Wrap in <title> tag.
+   - Make the reader think "This will solve my problem"
+2. Introduction: 3-4 sentences. Empathize with reader's situation, promise clear value
+3. Body: 5-7 H2 subheadings, 300-500 characters each section
+   - Every claim backed by specific numbers, comparisons, or sources
+   - Include actionable steps the reader can execute immediately
+   - At least one unique insight not found on other top-ranking pages
+   - Use <strong> for key information (minimum 5)
+4. Conclusion: 3-line summary + specific "do this right now" action
+5. Tone: Conversational yet authoritative — like explaining to a smart friend over coffee
+   - Active voice preferred. No corporate jargon.
+   - Vary sentence length: short punchy (5 words) mixed with detailed (20 words)
+6. Length: 2,500-4,500 words (thorough, no fluff)
+7. Structure: Clean formatting, logical flow, easy to scan
+   - Short paragraphs, comparison tables, bulleted lists where helpful
+
+=== HTML Rules ===
+- <title>Post Title</title> at the top
+- Use <h2>, <p>, <strong>, <ul>/<ol>, <table>
+- No <h1> (WordPress auto-generates)
+- Each <p> is 2-4 sentences. At least 2 <p> between H2s.
+"""
+
+POLISH_PROMPT_EN = """Upgrade this blog draft to a level that makes readers bookmark it.
+
+Keyword: {keyword}
+
+Upgrade rules:
+1. Remove ALL AI-sounding phrases:
+   "In conclusion", "It's worth noting", "Let's dive in", "In today's world",
+   "Whether you're a... or a...", "Look no further", "When it comes to"
+   → Replace with natural, human-written language
+2. Every paragraph must have at least 1 specific number, case study, or comparison
+3. Sentence rhythm: mix short punchy sentences with longer detailed ones
+4. Reader engagement: question→answer, problem→solution patterns
+5. Place keyword naturally in 2-3 H2s, intro, and conclusion
+6. Keep HTML structure intact, upgrade content quality only
+7. Minimum 5 <strong> tags
+8. If under 2,500 words, add practical, actionable content to reach 2,500+
+
+Draft:
+{draft}
+"""
+
+# ── AdSense 승인 전용 프롬프트 (한국어) ──
+ADSENSE_DRAFT_PROMPT_KO = """당신은 이 분야의 권위 있는 전문가입니다.
+독자가 즐겨찾기에 저장할 만큼 완벽한 레퍼런스 글을 작성합니다.
+
+키워드: {keyword}
+검색의도: {intent}
+카테고리: {category}
+고유코드: {unique_seed}
+
+=== AdSense 승인 품질 기준 ===
+1. 제목: 전문적이면서 검색 친화적. <title> 태그
+2. 도입부: 4~5문장. 이 주제가 왜 중요한지, 독자가 무엇을 얻을 수 있는지 명확히
+3. 본문: H2 소제목 7~9개, 각 소제목 아래 400~600자
+   - 모든 주장에 데이터 출처, 통계, 전문가 의견 포함
+   - 비교표, 체크리스트, 단계별 가이드 등 실용적 구성
+   - 독자가 바로 활용할 수 있는 액션 아이템 각 섹션마다 1개
+   - <strong> 강조 최소 8개
+   - 외부 광고성 링크 절대 금지
+4. 마무리: 핵심 요약 5줄 + FAQ 3개 (자주 묻는 질문과 답변)
+5. 톤: 신뢰감 있는 전문가 톤 + 읽기 쉬운 구성
+6. 분량: 5,000~8,000자 (빈틈없이 상세하게)
+7. 품질: 이 글 하나로 해당 주제의 모든 궁금증이 해결되는 수준
+
+=== HTML 규칙 ===
+- <title>글제목</title>을 최상단에
+- <h2>, <h3>, <p>, <strong>, <ul>/<ol>, <table> 사용
+- <h1> 금지
+- 각 <p>는 2~3문장, H2 사이 최소 3개 <p>
+- FAQ는 <h3>질문</h3><p>답변</p> 형식
+"""
+
+# ── AdSense 승인 전용 프롬프트 (영문) ──
+ADSENSE_DRAFT_PROMPT_EN = """You are an authoritative expert in this field.
+Write a definitive reference article that readers will bookmark and share.
+
+Keyword: {keyword}
+Search Intent: {intent}
+Category: {category}
+Unique Code: {unique_seed}
+
+=== AdSense Approval Quality Standards ===
+1. Title: Professional and search-friendly. Wrap in <title> tag.
+2. Introduction: 4-5 sentences. Why this topic matters. What the reader will gain.
+3. Body: 7-9 H2 subheadings, 400-600 chars per section
+   - Every claim supported by data, statistics, or expert opinions
+   - Comparison tables, checklists, step-by-step guides
+   - Actionable takeaway in every section
+   - Minimum 8 <strong> tags
+   - Absolutely NO promotional or affiliate links
+4. Conclusion: 5-line summary + 3 FAQs (with <h3> question / <p> answer)
+5. Tone: Trustworthy expert voice + easy-to-read structure
+6. Length: 3,000-5,000 words (comprehensive, no filler)
+7. Quality: This single article should answer ALL questions about the topic
+
+=== HTML Rules ===
+- <title>Post Title</title> at the top
+- Use <h2>, <h3>, <p>, <strong>, <ul>/<ol>, <table>
+- No <h1>
+- Each <p> is 2-3 sentences. At least 3 <p> between H2s.
+- FAQ format: <h3>Question</h3><p>Answer</p>
+"""
+
+# ── 프롬프트 선택 함수 ──
+def get_prompts(lang="ko", adsense_mode=False):
+    """언어와 모드에 따라 적절한 프롬프트 반환"""
+    if adsense_mode:
+        if lang == "en":
+            return ADSENSE_DRAFT_PROMPT_EN, POLISH_PROMPT_EN
+        return ADSENSE_DRAFT_PROMPT_KO, POLISH_PROMPT_KO
+    if lang == "en":
+        return DRAFT_PROMPT_EN, POLISH_PROMPT_EN
+    return DRAFT_PROMPT_KO, POLISH_PROMPT_KO
 
 
 class ContentGenerator:
@@ -437,23 +585,39 @@ class ContentGenerator:
         "claude-haiku-4-5-20241022": {"input": 0.001, "output": 0.005},
     }
 
-    def generate(self, keyword, intent="informational", category="", unique_seed=""):
-        """멀티모델 폴체인: Grok→Gemini→DeepSeek (초안) + Claude (폴리싱)"""
+    def generate(self, keyword, intent="informational", category="",
+                 unique_seed="", lang="ko", adsense_mode=False,
+                 preferred_draft=None, preferred_polish=None):
+        """멀티모델 폴체인 + 언어/모드 분기 + 모델 선택 반영"""
         if not unique_seed:
             unique_seed = hashlib.md5(
                 f"{SITE_ID}-{keyword}-{datetime.now(KST).isoformat()}-{random.random()}".encode()
             ).hexdigest()[:12]
-        prompt = DRAFT_PROMPT.format(keyword=keyword, intent=intent, category=category, unique_seed=unique_seed)
+
+        draft_tmpl, polish_tmpl = get_prompts(lang, adsense_mode)
+        prompt = draft_tmpl.format(keyword=keyword, intent=intent, category=category, unique_seed=unique_seed)
 
         draft = None
         draft_model = None
 
-        if GROK_KEY:
-            draft, draft_model = self._call_grok(prompt)
-        if not draft and GEMINI_KEY:
-            draft, draft_model = self._call_gemini(prompt)
-        if not draft and DEEPSEEK_KEY:
-            draft, draft_model = self._call_deepseek(prompt)
+        # 대시보드에서 선택한 모델을 1순위로 시도
+        model_chain = []
+        if preferred_draft:
+            model_chain.append(preferred_draft)
+        # 기본 폴체인 추가 (중복 제외)
+        for m in ["grok", "gemini", "deepseek"]:
+            if m not in [preferred_draft]:
+                model_chain.append(m)
+
+        for model_id in model_chain:
+            if draft:
+                break
+            if model_id in ("grok", "grok-3", "grok-3-mini") and GROK_KEY:
+                draft, draft_model = self._call_grok(prompt)
+            elif model_id in ("gemini", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash") and GEMINI_KEY:
+                draft, draft_model = self._call_gemini(prompt)
+            elif model_id in ("deepseek", "deepseek-chat") and DEEPSEEK_KEY:
+                draft, draft_model = self._call_deepseek(prompt)
 
         if not draft:
             log.error(f"모든 모델 실패: {keyword}")
@@ -462,8 +626,12 @@ class ContentGenerator:
         log.info(f"초안 완료 [{draft_model}] ({len(draft)}자)")
         draft_cost = self._estimate_cost(draft_model, prompt, draft)
 
+        # 폴리싱 (preferred_polish가 'none'이면 스킵)
+        if preferred_polish == "none":
+            return draft, draft_cost, len(draft)
+
         if CLAUDE_KEY:
-            polish_prompt = POLISH_PROMPT.format(keyword=keyword, draft=draft)
+            polish_prompt = polish_tmpl.format(keyword=keyword, draft=draft)
             polished = self._call_claude_polish(polish_prompt)
             if polished:
                 polish_cost = self._estimate_cost("claude-sonnet-4-20250514", polish_prompt, polished)
@@ -1336,6 +1504,64 @@ class NaverCafePublisher:
 
 
 # ═══════════════════════════════════════════════════════
+# 10-B. Telegram 자동 공유
+# ═══════════════════════════════════════════════════════
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+class TelegramPublisher:
+    def is_configured(self):
+        return bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+
+    def publish(self, title, keyword, wp_url=""):
+        if not self.is_configured():
+            return None
+        import requests
+        text = f"<b>{title}</b>\n\n#{keyword.replace(' ', '_')}\n\n{wp_url}" if wp_url else f"<b>{title}</b>\n\n#{keyword.replace(' ', '_')}"
+        try:
+            resp = requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML",
+                      "disable_web_page_preview": False},
+                timeout=10
+            )
+            if resp.status_code == 200:
+                log.info("  Telegram 공유 완료")
+                return True
+        except Exception as e:
+            log.warning(f"  Telegram 공유 실패: {e}")
+        return None
+
+
+# ═══════════════════════════════════════════════════════
+# 10-C. Discord 자동 공유
+# ═══════════════════════════════════════════════════════
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
+
+class DiscordPublisher:
+    def is_configured(self):
+        return bool(DISCORD_WEBHOOK_URL)
+
+    def publish(self, title, keyword, wp_url=""):
+        if not self.is_configured():
+            return None
+        import requests
+        content = f"**{title}**\n> {keyword}\n{wp_url}" if wp_url else f"**{title}**\n> {keyword}"
+        try:
+            resp = requests.post(
+                DISCORD_WEBHOOK_URL,
+                json={"content": content},
+                timeout=10
+            )
+            if resp.status_code in (200, 204):
+                log.info("  Discord 공유 완료")
+                return True
+        except Exception as e:
+            log.warning(f"  Discord 공유 실패: {e}")
+        return None
+
+
+# ═══════════════════════════════════════════════════════
 # 11. API 상태 체크 — Supabase에 연결 상태 기록
 # ═══════════════════════════════════════════════════════
 def check_api_status():
@@ -1353,6 +1579,8 @@ def check_api_status():
         "supabase": bool(SUPABASE_URL and SUPABASE_KEY),
         "naver_cafe": bool(NAVER_CLIENT_ID and NAVER_CLIENT_SECRET and NAVER_REFRESH_TOKEN
                            and NAVER_CAFE_CLUBID and NAVER_CAFE_MENUID),
+        "telegram": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID),
+        "discord": bool(DISCORD_WEBHOOK_URL),
     }
 
     log.info("API 상태 체크:")
@@ -1445,13 +1673,53 @@ def _get_all_active_sites():
         return []
 
 
-def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None):
+def should_run_now():
+    """대시보드 스케줄 설정과 현재 시각 비교. 해당 안 되면 False."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return True  # 설정 없으면 항상 실행
+    import requests
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/dashboard_config?id=eq.global",
+            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+            timeout=10
+        )
+        rows = resp.json()
+        if not rows or len(rows) == 0:
+            return True
+        settings = rows[0].get("settings", {})
+        sel_days = settings.get("selDays")
+        sel_times = settings.get("selTimes")
+        if not sel_days and not sel_times:
+            return True  # 스케줄 미설정 → 항상 실행
+
+        tz_id = settings.get("tz", "KST")
+        tz_offsets = {"KST": 9, "EST": -5, "CST": -6, "PST": -8}
+        offset = tz_offsets.get(tz_id, 9)
+        now = datetime.now(timezone(timedelta(hours=offset)))
+        current_day = now.weekday()  # 0=월 ~ 6=일
+        current_time = now.strftime("%H:%M")
+        # 30분 윈도우 체크
+        current_h, current_m = now.hour, now.minute
+        slot = f"{current_h:02d}:{'00' if current_m < 30 else '30'}"
+
+        if sel_days and current_day not in sel_days:
+            log.info(f"스케줄 게이트: 오늘({current_day})은 발행일이 아닙니다 (설정: {sel_days})")
+            return False
+        if sel_times and slot not in sel_times:
+            log.info(f"스케줄 게이트: 현재({slot})는 발행 시간이 아닙니다 (설정: {sel_times})")
+            return False
+        return True
+    except Exception:
+        return True  # 오류 시 안전하게 실행
+
+
+def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None, adsense_mode=False):
     """단일 사이트 파이프라인. site_override가 있으면 해당 사이트 설정 사용."""
     global SITE_ID, WP_URL, WP_USER, WP_PASS
 
     # 사이트 설정 로드
     if site_override:
-        # 멀티사이트 모드: Supabase에서 가져온 사이트 설정 적용
         SITE_ID = site_override["id"]
         WP_URL = site_override.get("wp_url", "")
         cfg = site_override.get("config") or {}
@@ -1468,6 +1736,28 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
         db_target = site_config.get("daily_target")
         if db_target and count == 5:
             count = db_target
+
+    # 글로벌 + 사이트별 설정 병합
+    global_cfg = {}
+    if SUPABASE_URL and SUPABASE_KEY:
+        import requests as _req
+        try:
+            _r = _req.get(f"{SUPABASE_URL}/rest/v1/dashboard_config?id=eq.global",
+                         headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}, timeout=10)
+            _rows = _r.json()
+            if _rows and len(_rows) > 0:
+                global_cfg = _rows[0].get("settings", {})
+        except Exception:
+            pass
+
+    site_cfg = (site_config or {}).get("config") or {}
+    ai_cfg = (site_config or {}).get("ai_config") or {}
+
+    # 유효 설정: 사이트 > 글로벌 > 기본값
+    effective_lang = site_cfg.get("lang", global_cfg.get("lang", "ko"))
+    effective_draft_model = ai_cfg.get("draft_model", site_cfg.get("draft_model"))
+    effective_polish_model = ai_cfg.get("polish_model", site_cfg.get("polish_model"))
+    effective_adsense = adsense_mode or site_cfg.get("adsense_mode", False)
 
     if not WP_URL:
         log.error(f"[{SITE_ID}] WP_URL 없음 — 스킵")
@@ -1531,7 +1821,11 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
         log.info(f"{'='*50}")
 
         # Step 1: AI 글 생성
-        content, cost_usd, content_length = cg.generate(keyword, intent, category, unique_seed)
+        content, cost_usd, content_length = cg.generate(
+            keyword, intent, category, unique_seed,
+            lang=effective_lang, adsense_mode=effective_adsense,
+            preferred_draft=effective_draft_model, preferred_polish=effective_polish_model
+        )
         if not content:
             fail += 1
             sb.log_publish({"keyword": keyword, "status": "failed",
@@ -1551,22 +1845,52 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
             log.info(f"이미지 삽입 완료 [{image_source}]")
 
         # Step 4: 제휴 링크 삽입
-        content, has_coupang = am.insert_links(content, keyword, category)
-        if has_coupang:
-            log.info("제휴 링크 삽입 완료")
+        has_coupang = False
+        if not effective_adsense:  # AdSense 승인 모드에서는 제휴 링크 비활성화
+            content, has_coupang = am.insert_links(content, keyword, category)
+            if has_coupang:
+                log.info("제휴 링크 삽입 완료")
+        else:
+            log.info("  AdSense 모드 — 제휴 링크 스킵")
 
         # Step 5: AdSense HTML 최적화
         content = ao.optimize(content)
         log.info("AdSense HTML 최적화 완료")
 
-        # Step 6: 품질 검증
+        # Step 6: 품질 검증 (AdSense 모드: 85점, 일반: 70점)
+        min_score = 85 if effective_adsense else qg.MIN_SCORE
         passed, quality_score, q_details = qg.validate(content, keyword, has_image)
+        passed = quality_score >= min_score
+
+        # AdSense 모드: 미달 시 최대 2회 재생성
+        if not passed and effective_adsense:
+            for retry in range(2):
+                log.info(f"  AdSense 모드 재생성 ({retry+1}/2) — {quality_score}점 < {min_score}점")
+                content2, cost2, len2 = cg.generate(
+                    keyword, intent, category, "",
+                    lang=effective_lang, adsense_mode=True,
+                    preferred_draft=effective_draft_model, preferred_polish=effective_polish_model
+                )
+                if content2:
+                    title2, content2 = extract_title(content2)
+                    if img_data:
+                        content2, _, _ = im.insert_image(content2, img_data)
+                    content2 = ao.optimize(content2)
+                    _, qs2, _ = qg.validate(content2, keyword, has_image)
+                    if qs2 >= min_score:
+                        content, title, quality_score = content2, title2, qs2
+                        content_length = len2
+                        cost_usd += cost2
+                        passed = True
+                        log.info(f"  재생성 성공 — {qs2}점")
+                        break
+                    quality_score = max(quality_score, qs2)
 
         if not passed:
-            log.warning(f"품질 미달 ({quality_score}/100) — 그래도 발행 진행 (기록)")
+            log.warning(f"품질 {'미달' if not effective_adsense else '미달(재생성 실패)'} ({quality_score}/{min_score}) — 발행 진행")
             sb.log_alert(
                 f"품질 미달: {keyword}",
-                f"점수 {quality_score}/100. 항목: {json.dumps(q_details, ensure_ascii=False)[:300]}",
+                f"점수 {quality_score}/{min_score}. 항목: {json.dumps(q_details, ensure_ascii=False)[:300]}",
                 "warning", "quality_low"
             )
 
@@ -1585,12 +1909,25 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
             km.mark_used(keyword)
             success += 1
 
-            # Step 8: 네이버 카페 자동 공유
+            # Step 8: SNS 자동 공유 (snsOn 토글 반영)
+            sns_on = global_cfg.get("snsOn", {})
             sns_shared = []
-            if nc.is_configured():
-                cafe_url = nc.publish(title, content, wp_url=result.get("url", ""))
+            wp_link = result.get("url", "")
+
+            if nc.is_configured() and sns_on.get("naver_cafe", True):
+                cafe_url = nc.publish(title, content, wp_url=wp_link)
                 if cafe_url:
                     sns_shared.append("naver_cafe")
+
+            tg = TelegramPublisher()
+            if tg.is_configured() and sns_on.get("telegram", True):
+                if tg.publish(title, keyword, wp_link):
+                    sns_shared.append("telegram")
+
+            dc = DiscordPublisher()
+            if dc.is_configured() and sns_on.get("discord", True):
+                if dc.publish(title, keyword, wp_link):
+                    sns_shared.append("discord")
 
             sb.log_publish({
                 "title": title, "url": result.get("url", ""),
@@ -1649,7 +1986,7 @@ def _git_commit_used():
 # ═══════════════════════════════════════════════════════
 # 멀티사이트 실행
 # ═══════════════════════════════════════════════════════
-def run_all_sites(count=5, dry_run=False, pipeline="autoblog"):
+def run_all_sites(count=5, dry_run=False, pipeline="autoblog", adsense_mode=False):
     """Supabase에서 모든 active 사이트를 조회하고 순차적으로 파이프라인 실행"""
     check_api_status()
 
@@ -1680,7 +2017,7 @@ def run_all_sites(count=5, dry_run=False, pipeline="autoblog"):
         log.info(f"{'#'*60}")
 
         try:
-            run_pipeline(count=count, dry_run=dry_run, pipeline=pipeline, site_override=site)
+            run_pipeline(count=count, dry_run=dry_run, pipeline=pipeline, site_override=site, adsense_mode=adsense_mode)
         except Exception as e:
             log.error(f"[{site['id']}] 파이프라인 오류: {e}")
 
@@ -1699,6 +2036,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="발행 없이 테스트")
     parser.add_argument("--pipeline", default="autoblog", help="파이프라인 (autoblog/hotdeal/promo)")
     parser.add_argument("--all-sites", action="store_true", help="Supabase 등록된 모든 active 사이트에 발행")
+    parser.add_argument("--adsense-mode", action="store_true", help="AdSense 승인용 고품질 모드 (85점+, 재생성)")
     parser.add_argument("--site-id", default="", help="특정 사이트 ID 지정 (기본: SITE_ID 환경변수)")
     parser.add_argument("--setup-pages", action="store_true", help="AdSense 필수 페이지 자동 생성")
     parser.add_argument("--check-status", action="store_true", help="API 연결 상태 체크 → Supabase 기록")
@@ -1726,7 +2064,8 @@ def main():
 
     # 멀티사이트 모드
     if args.all_sites:
-        run_all_sites(count=args.count, dry_run=args.dry_run, pipeline=args.pipeline)
+        run_all_sites(count=args.count, dry_run=args.dry_run, pipeline=args.pipeline,
+                      adsense_mode=args.adsense_mode)
         return
 
     # 특정 사이트 지정
@@ -1735,7 +2074,8 @@ def main():
         SITE_ID = args.site_id
         site = _get_site_config(args.site_id)
         if site:
-            run_pipeline(count=args.count, dry_run=args.dry_run, pipeline=args.pipeline, site_override=site)
+            run_pipeline(count=args.count, dry_run=args.dry_run, pipeline=args.pipeline,
+                         site_override=site, adsense_mode=args.adsense_mode)
         else:
             log.error(f"사이트 '{args.site_id}' 를 찾을 수 없습니다.")
             sys.exit(1)
@@ -1745,7 +2085,8 @@ def main():
     if not WP_URL:
         log.error("WP_URL 환경변수 없음. --all-sites 또는 --site-id를 사용하세요.")
         sys.exit(1)
-    run_pipeline(count=args.count, dry_run=args.dry_run, pipeline=args.pipeline)
+    run_pipeline(count=args.count, dry_run=args.dry_run, pipeline=args.pipeline,
+                 adsense_mode=args.adsense_mode)
 
 
 if __name__ == "__main__":
