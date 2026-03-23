@@ -18,6 +18,10 @@ on:
         description: '파이프라인 (autoblog/hotdeal/promo)'
         required: false
         default: 'autoblog'
+      niche:
+        description: '니치/카테고리 필터 (빈값=전체)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -84,10 +88,14 @@ sys.exit(0 if should_run_now() else 1)
           COUNT="${{ github.event.inputs.count || '3' }}"
           DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
           PIPELINE="${{ github.event.inputs.pipeline || 'autoblog' }}"
+          NICHE="${{ github.event.inputs.niche || '' }}"
 
           ARGS="--all-sites --count $COUNT --pipeline $PIPELINE"
           if [ "$DRY_RUN" = "true" ]; then
             ARGS="$ARGS --dry-run"
+          fi
+          if [ -n "$NICHE" ]; then
+            ARGS="$ARGS --niche $NICHE"
           fi
 
           python scripts/main.py $ARGS

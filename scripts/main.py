@@ -71,14 +71,18 @@ class KeywordManager:
         with open(self.used_file, "w", encoding="utf-8") as f:
             json.dump(self.used, f, ensure_ascii=False, indent=2)
 
-    def select(self, count=5, pipeline="autoblog"):
-        """미사용 키워드 중 count개 선택"""
+    def select(self, count=5, pipeline="autoblog", niche=""):
+        """미사용 키워드 중 count개 선택 (niche로 카테고리 필터링)"""
         pool = self.keywords.get("keywords", [])
         available = [
             kw for kw in pool
             if kw.get("keyword") not in self.used
             and kw.get("pipeline", "autoblog") == pipeline
+            and (not niche or kw.get("category", "") == niche)
         ]
+
+        if niche:
+            log.info(f"  니치 필터: '{niche}' -> {len(available)}개 키워드")
 
         if len(available) < count:
             log.warning(f"가용 키워드 {len(available)}개 (요청 {count}개)")
@@ -1623,6 +1627,114 @@ def check_api_status():
 
 
 # ═══════════════════════════════════════════════════════
+# 11-B. 콘텐츠 후처리 (Python 기반 — Claude 폴리싱 대체)
+# ═══════════════════════════════════════════════════════
+import re as _re
+
+
+class ContentFormatter:
+    """AI 폴리싱 없이 Python으로 HTML 스타일링 + AI 표현 치환"""
+
+    # AI 특유 표현 -> 자연스러운 대체어 매핑
+    AI_REPLACEMENTS = [
+        ("살펴보도록 하겠습니다", "바로 확인해볼게요"),
+        ("살펴보겠습니다", "확인해볼게요"),
+        ("알아보도록 하겠습니다", "정리해드릴게요"),
+        ("알아보겠습니다", "정리해볼게요"),
+        ("말씀드리겠습니다", "알려드릴게요"),
+        ("소개해드리겠습니다", "알려드릴게요"),
+        ("확인해보겠습니다", "확인해볼게요"),
+        ("설명드리겠습니다", "설명해드릴게요"),
+        ("도움이 되셨으면 좋겠습니다", "도움이 되셨길 바라요"),
+        ("도움이 되셨기를 바랍니다", "도움이 되셨길 바라요"),
+        ("마무리하겠습니다", "마무리할게요"),
+        ("시작하겠습니다", "시작해볼게요"),
+    ]
+
+    H2_STYLE = (
+        'style="font-size:22px;font-weight:800;color:#1a1a1a;'
+        'margin:40px 0 16px;padding-bottom:12px;border-bottom:3px solid #1a73e8"'
+    )
+
+    P_STYLE = 'style="line-height:1.9;color:#333;margin:16px 0;font-size:16px"'
+
+    CTA_BOX = (
+        '\n<div style="background:linear-gradient(135deg,#1a73e8,#4285f4);'
+        'border-radius:12px;padding:24px 28px;margin:32px 0;text-align:center">\n'
+        '<p style="color:#fff;font-size:18px;font-weight:700;margin:0 0 8px">'
+        '\U0001f680 지금 바로 확인해보세요</p>\n'
+        '<p style="color:rgba(255,255,255,0.9);margin:0;font-size:15px">'
+        '위 내용을 참고해서 나에게 맞는 선택을 해보세요</p>\n'
+        '</div>\n'
+    )
+
+    def format(self, content, keyword=""):
+        """콘텐츠 후처리 파이프라인"""
+        original_len = len(content)
+
+        content = self._replace_ai_expressions(content)
+        content = self._style_h2(content)
+        content = self._style_p(content)
+        content = self._ensure_cta(content)
+        content = self._clean_empty_tags(content)
+
+        changes = len(content) - original_len
+        log.info(f"   H2 스타일링, p 스타일링, AI 표현 치환, 구조 검증 완료 ({changes:+d}자)")
+        return content
+
+    def _replace_ai_expressions(self, content):
+        """AI 특유 표현을 자연스러운 구어체로 치환"""
+        count = 0
+        for old, new in self.AI_REPLACEMENTS:
+            if old in content:
+                content = content.replace(old, new)
+                count += 1
+        if count:
+            log.info(f"   AI 표현 {count}개 치환")
+        return content
+
+    def _style_h2(self, content):
+        """스타일 없는 H2에 프리미엄 스타일 적용"""
+        def _replace_h2(m):
+            tag = m.group(0)
+            if 'style=' in tag:
+                return tag
+            return tag.replace('<h2', f'<h2 {self.H2_STYLE}', 1)
+
+        return _re.sub(r'<h2[^>]*>', _replace_h2, content, flags=_re.IGNORECASE)
+
+    def _style_p(self, content):
+        """스타일 없는 p에 기본 스타일 적용"""
+        def _replace_p(m):
+            tag = m.group(0)
+            if 'style=' in tag:
+                return tag
+            return tag.replace('<p', f'<p {self.P_STYLE}', 1)
+
+        return _re.sub(r'<p(?:\s[^>]*)?>',  _replace_p, content, flags=_re.IGNORECASE)
+
+    def _ensure_cta(self, content):
+        """마무리에 CTA 박스가 없으면 추가"""
+        cta_indicators = ['지금 바로', '시작하세요', '확인해보세요', '신청하세요']
+        has_cta_box = any(
+            ind in content[-500:] for ind in cta_indicators
+        ) and '<div' in content[-800:]
+
+        if has_cta_box:
+            return content
+
+        content = content.rstrip() + self.CTA_BOX
+        log.info("   CTA 박스 추가")
+        return content
+
+    def _clean_empty_tags(self, content):
+        """빈 태그, 불필요한 공백 정리"""
+        content = _re.sub(r'<p[^>]*>\s*</p>', '', content)
+        content = _re.sub(r'\n{3,}', '\n\n', content)
+        return content
+
+
+# ═══════════════════════════════════════════════════════
 # 12. 메인 파이프라인
 # ═══════════════════════════════════════════════════════
 def extract_title(content):
@@ -1779,6 +1891,7 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
     km = KeywordManager()
     dkg = DynamicKeywordGenerator()
     cg = ContentGenerator()
+    cf = ContentFormatter()
     im = ImageManager()
     am = AffiliateManager()
     ao = AdSenseOptimizer()
@@ -1833,6 +1946,10 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
             continue
 
         log.info(f"글 생성 완료 ({content_length}자)")
+
+        # Step 1.5: Python 후처리 (스타일링 + AI 표현 치환)
+        content = cf.format(content, keyword=keyword)
+        content_length = len(content)
 
         # Step 2: 제목 추출
         title, content = extract_title(content)
@@ -2042,6 +2159,8 @@ def main():
     parser.add_argument("--check-status", action="store_true", help="API 연결 상태 체크 → Supabase 기록")
     parser.add_argument("--site-name", default="", help="사이트 이름 (필수 페이지용)")
     parser.add_argument("--email", default="contact@example.com", help="연락처 이메일")
+    parser.add_argument("--niche", default="", help="니치/카테고리 필터 (재테크, 투자, 대출 등)")
+    parser.add_argument("--polish", action="store_true", help="Claude AI 폴리싱 활성화 (비용 증가)")
     args = parser.parse_args()
 
     # API 상태 체크 모드
