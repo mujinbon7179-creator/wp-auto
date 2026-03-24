@@ -93,7 +93,7 @@ resp = requests.post(f"{API}/menu-items", headers=HEADERS, json={
     "type": "custom",
     "menu_order": 1,
 }, timeout=10)
-print(f"  [{'OK' if resp.status_code == 200 else 'ERR'}] 홈 (status={resp.status_code})")
+print(f"  [{'OK' if resp.status_code in (200, 201) else 'ERR'}] 홈 (status={resp.status_code})")
 
 # 카테고리 아이템
 for i, cat in enumerate(TARGET_CATEGORIES, start=2):
@@ -113,7 +113,7 @@ for i, cat in enumerate(TARGET_CATEGORIES, start=2):
     }
     resp = requests.post(f"{API}/menu-items", headers=HEADERS, json=item_data, timeout=10)
 
-    if resp.status_code != 200:
+    if resp.status_code not in (200, 201):
         # custom 링크로 폴백
         item_data = {
             "title": cat["name"],
@@ -125,7 +125,7 @@ for i, cat in enumerate(TARGET_CATEGORIES, start=2):
         }
         resp = requests.post(f"{API}/menu-items", headers=HEADERS, json=item_data, timeout=10)
 
-    print(f"  [{'OK' if resp.status_code == 200 else 'ERR'}] {cat['name']} (order={i})")
+    print(f"  [{'OK' if resp.status_code in (200, 201) else 'ERR'}] {cat['name']} (order={i})")
 
 # ── 5. 최종 확인 ──
 print(f"\n=== 최종 메뉴 (ID={menu_id}) ===")
