@@ -2531,13 +2531,13 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
     """단일 사이트 파이프라인. site_override가 있으면 해당 사이트 설정 사용."""
     global SITE_ID, WP_URL, WP_USER, WP_PASS
 
-    # 사이트 설정 로드
+    # 사이트 설정 로드 (DB 값 → 환경변수 폴백)
     if site_override:
         SITE_ID = site_override["id"]
-        WP_URL = site_override.get("wp_url", "")
+        WP_URL = site_override.get("wp_url", "") or WP_URL
         cfg = site_override.get("config") or {}
-        WP_USER = cfg.get("wp_username", WP_USER)
-        WP_PASS = cfg.get("wp_app_password", WP_PASS)
+        WP_USER = cfg.get("wp_username", "") or WP_USER
+        WP_PASS = cfg.get("wp_app_password", "") or WP_PASS
         site_config = site_override
     else:
         site_config = _get_site_config()
