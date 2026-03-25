@@ -1142,37 +1142,94 @@ class QualityGate:
 class ImageManager:
     """이미지 3중 폴백: Pexels(1순위) → Pixabay(2순위) → Unsplash(백업)"""
 
-    # 한국어 키워드 → 영문 검색어 매핑 (공통 카테고리)
+    # 한국어 키워드 → 영문 검색어 매핑 (확장)
     KO_EN_FALLBACK = {
-        "대출": "loan finance", "보험": "insurance", "부동산": "real estate",
-        "투자": "investment", "주식": "stock market", "적금": "savings",
-        "건강": "health wellness", "다이어트": "diet fitness", "운동": "exercise",
-        "요리": "cooking food", "레시피": "recipe", "맛집": "restaurant",
-        "여행": "travel", "호텔": "hotel resort", "캠핑": "camping outdoor",
-        "육아": "parenting baby", "교육": "education study", "취업": "job career",
-        "IT": "technology", "프로그래밍": "programming coding", "앱": "mobile app",
-        "자동차": "car automotive", "인테리어": "interior design", "패션": "fashion style",
-        "뷰티": "beauty skincare", "반려동물": "pet dog cat", "결혼": "wedding",
-        "이사": "moving house", "세금": "tax accounting", "창업": "startup business",
+        # 금융/재테크
+        "대출": "loan finance bank", "보험": "insurance family protection",
+        "부동산": "real estate house", "투자": "investment portfolio",
+        "주식": "stock market trading", "적금": "savings piggy bank",
+        "ETF": "investment ETF chart", "재테크": "financial planning money",
+        "연금": "retirement pension", "월급": "salary paycheck office",
+        "배당": "dividend investment", "펀드": "fund investment",
+        "금리": "interest rate bank", "환율": "currency exchange",
+        "자산": "wealth asset management", "포트폴리오": "investment portfolio",
+        # 절세/정부
+        "세금": "tax accounting calculator", "절세": "tax saving documents",
+        "소득세": "income tax filing", "연말정산": "tax refund documents",
+        "정부지원": "government support application", "보조금": "subsidy grant money",
+        "지원금": "financial aid government", "소상공인": "small business shop",
+        # 부업/수익화
+        "부업": "side hustle freelance laptop", "수익화": "monetization income laptop",
+        "블로그": "blogging laptop writing", "프리랜서": "freelancer working laptop",
+        "쿠팡": "online shopping delivery", "어필리에이트": "affiliate marketing laptop",
+        "애드센스": "digital advertising website",
+        # IT/테크
+        "AI": "artificial intelligence robot technology",
+        "노트북": "laptop computer workspace", "가성비": "budget value shopping",
+        "재택근무": "remote work home office", "생산성": "productivity workspace desk",
+        "코딩": "programming coding screen", "개발자": "developer coding screen",
+        "앱": "mobile app smartphone", "소프트웨어": "software computer screen",
+        "IT": "technology digital", "가전": "home electronics appliance",
+        "전자제품": "electronics gadgets", "스마트": "smart technology device",
+        "청소기": "vacuum cleaner home", "에어컨": "air conditioner home",
+        "건조기": "dryer laundry home", "냉장고": "refrigerator kitchen",
+        # 생활경제
+        "생활비": "household budget saving", "절약": "saving money frugal",
+        "전월세": "apartment rental keys", "월세": "rent apartment living",
+        "전세": "apartment lease contract", "계약": "contract signing document",
+        "1인 가구": "single living apartment", "자취": "single living cooking",
+        "식비": "food budget grocery", "통신비": "mobile phone bill",
+        "전기세": "electricity bill saving",
+        # 건강
+        "건강": "health wellness exercise", "다이어트": "diet fitness healthy",
+        "운동": "exercise gym fitness", "실비": "health insurance hospital",
+        # 기존
+        "요리": "cooking food kitchen", "레시피": "recipe cooking",
+        "여행": "travel destination scenery", "호텔": "hotel resort vacation",
+        "캠핑": "camping outdoor nature", "육아": "parenting family baby",
+        "교육": "education study classroom", "취업": "job career interview",
+        "프로그래밍": "programming coding developer", "자동차": "car automotive",
+        "인테리어": "interior design home", "패션": "fashion style outfit",
+        "뷰티": "beauty skincare cosmetics", "반려동물": "pet dog cat",
+        "결혼": "wedding celebration", "이사": "moving house boxes",
+        "창업": "startup business entrepreneur",
     }
 
-    def _to_english_query(self, keyword):
+    # 카테고리 slug → 영문 이미지 검색어 폴백
+    CATEGORY_IMAGE_FALLBACK = {
+        "ai-tools": "artificial intelligence technology workspace",
+        "finance-invest": "investment finance chart money",
+        "side-income": "freelancer laptop side hustle income",
+        "tech-review": "technology gadgets electronics review",
+        "gov-support": "government support application documents",
+        "life-economy": "household budget saving money",
+    }
+
+    def _to_english_query(self, keyword, category=""):
         """한국어 키워드를 영문 이미지 검색어로 변환"""
         # 이미 영문이면 그대로
         if all(ord(c) < 128 or c == ' ' for c in keyword):
             return keyword
 
-        # 매핑 테이블에서 매칭되는 단어 찾기
-        for ko, en in self.KO_EN_FALLBACK.items():
-            if ko in keyword:
-                return en
+        # 매핑 테이블에서 매칭되는 단어 찾기 (가장 긴 매칭 우선)
+        matches = [(ko, en) for ko, en in self.KO_EN_FALLBACK.items() if ko in keyword]
+        if matches:
+            # 가장 긴 한국어 키워드 매칭 선택 (더 구체적)
+            best = max(matches, key=lambda x: len(x[0]))
+            return best[1]
 
-        # 매칭 실패 시: 카테고리 기반 범용 검색어
-        return "lifestyle modern"
+        # 카테고리 기반 폴백
+        if category:
+            cat_query = self.CATEGORY_IMAGE_FALLBACK.get(category)
+            if cat_query:
+                return cat_query
 
-    def fetch_image(self, keyword):
+        # 최종 폴백: 비즈니스/기술 범용 (그라데이션 방지)
+        return "business office workspace professional"
+
+    def fetch_image(self, keyword, category=""):
         """3중 폴백으로 이미지 검색 (한국어 키워드 자동 영문 변환)"""
-        en_query = self._to_english_query(keyword)
+        en_query = self._to_english_query(keyword, category)
         log.info(f"  이미지 검색: '{keyword}' → '{en_query}'")
 
         # 1순위: Pexels (고품질 무료)
@@ -1199,9 +1256,9 @@ class ImageManager:
         log.warning(f"모든 이미지 API 실패: {keyword} (en: {en_query})")
         return None
 
-    def fetch_multiple(self, keyword, count=3):
+    def fetch_multiple(self, keyword, count=3, category=""):
         """여러 장의 이미지를 가져와 분산 삽입용으로 반환"""
-        en_query = self._to_english_query(keyword)
+        en_query = self._to_english_query(keyword, category)
         images = []
 
         # Pexels에서 여러 장 가져오기
@@ -2779,13 +2836,13 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
     wp = WordPressPublisher()
     sb = SupabaseLogger()
 
-    # 1순위: 대시보드 니치 기반 동적 키워드 생성
-    keywords = dkg.generate(count=count)
+    # 1순위: 정적 keywords.json (SEO slug/메타 포함된 큐레이션 키워드)
+    keywords = km.select(count=count, pipeline=pipeline)
 
-    # 2순위: 정적 keywords.json 폴백
+    # 2순위: 동적 키워드 생성 폴백 (정적 키워드 소진 시)
     if not keywords:
-        log.info("  정적 키워드 폴백 사용")
-        keywords = km.select(count=count, pipeline=pipeline)
+        log.info("  정적 키워드 소진 → 동적 키워드 생성")
+        keywords = dkg.generate(count=count)
 
     if not keywords:
         log.error("사용 가능한 키워드 없음!")
@@ -2835,14 +2892,14 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
         log.info(f"제목: {title}")
 
         # Step 3: 다중 이미지 삽입 (2~3장 분산)
-        images = im.fetch_multiple(keyword, count=3)
+        images = im.fetch_multiple(keyword, count=3, category=category)
         if images:
             content, has_image, image_source = im.insert_multiple_images(content, images)
             img_data = images[0]  # 품질 재검증용 (기존 호환)
             log.info(f"이미지 {len(images)}장 분산 삽입 [{image_source}]")
         else:
             # 폴백: 단일 이미지라도 시도
-            img_data = im.fetch_image(keyword)
+            img_data = im.fetch_image(keyword, category=category)
             content, has_image, image_source = im.insert_image(content, img_data)
             if has_image:
                 log.info(f"이미지 1장 삽입 [{image_source}]")
