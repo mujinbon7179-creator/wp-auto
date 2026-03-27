@@ -32,7 +32,7 @@ log = logging.getLogger("etf-report")
 KST = timezone(timedelta(hours=9))
 
 # 환경변수
-ETF_API_URL = os.environ.get("ETF_API_URL", "https://etfs-production.up.railway.app")
+ETF_API_URL = os.environ.get("ETF_API_URL", "") or "https://etfs-production.up.railway.app"
 WP_URL = os.environ.get("WP_URL", "")
 WP_USER = os.environ.get("WP_USERNAME", "")
 WP_PASS = os.environ.get("WP_APP_PASSWORD", "")
