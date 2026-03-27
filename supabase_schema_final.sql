@@ -40,6 +40,10 @@ CREATE TABLE IF NOT EXISTS publish_logs (
     seo_indexed BOOLEAN DEFAULT FALSE,
     cluster_id TEXT,
     cannibal_score FLOAT DEFAULT 0,
+    quality_score FLOAT DEFAULT 0,
+    views INT DEFAULT 0,
+    views_source TEXT,                        -- 'jetpack', 'wp-statistics', 'post_meta', 'unavailable'
+    views_updated_at TIMESTAMPTZ,
     status TEXT DEFAULT 'published',          -- 'published', 'failed', 'dry_run'
     error_message TEXT,
     published_at TIMESTAMPTZ DEFAULT NOW(),

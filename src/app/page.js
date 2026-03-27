@@ -2142,7 +2142,7 @@ function PostsTab({ siteId }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
-                {['시간', '제목', '품질', '파이프라인', '키워드', '길이', '이미지', '쿠팡', 'SNS', '상태'].map(h => (
+                {['시간', '제목', '품질', '조회수', '파이프라인', '키워드', '길이', '이미지', '쿠팡', 'SNS', '상태'].map(h => (
                   <th key={h} style={{
                     textAlign: 'left', padding: '12px 8px', color: '#94a3b8',
                     fontWeight: 600, fontSize: 11, letterSpacing: 0.5
@@ -2171,6 +2171,13 @@ function PostsTab({ siteId }) {
                       }}>
                         {p.quality_score}
                       </span>
+                    ) : (
+                      <span style={{ color: '#cbd5e1', fontSize: 11 }}>—</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '12px 8px', fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>
+                    {p.views > 0 ? (
+                      <span style={{ color: '#6366f1', fontWeight: 600 }}>{fmt(p.views)}</span>
                     ) : (
                       <span style={{ color: '#cbd5e1', fontSize: 11 }}>—</span>
                     )}

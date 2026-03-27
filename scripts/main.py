@@ -119,6 +119,29 @@ class KeywordManager:
             self.used.append(keyword)
             self._save_used()
 
+    # ── 카니발라이제이션 검사 ──
+    def check_cannibalization(self, keyword, threshold=0.6):
+        """새 키워드와 기존 사용 키워드 간 Jaccard 유사도 비교.
+        threshold 이상이면 (유사 키워드, 점수) 리스트 반환."""
+        new_words = set(keyword.lower().split())
+        if len(new_words) < 2:
+            return []
+
+        conflicts = []
+        for used_kw in self.used:
+            # used_keywords.json에 해시 프리픽스가 붙은 항목 제거
+            clean = used_kw.split(" ", 1)[-1] if " " in used_kw and len(used_kw.split(" ", 1)[0]) == 12 else used_kw
+            used_words = set(clean.lower().split())
+            if len(used_words) < 2:
+                continue
+            intersection = new_words & used_words
+            union = new_words | used_words
+            jaccard = len(intersection) / len(union) if union else 0
+            if jaccard >= threshold:
+                conflicts.append((clean, round(jaccard, 2)))
+
+        return sorted(conflicts, key=lambda x: x[1], reverse=True)
+
 
 # ═══════════════════════════════════════════════════════
 # 1-B. 동적 키워드 생성 — 니치 기반 AI 키워드 (다양성 보장)
@@ -923,6 +946,16 @@ GOLDEN_DRAFT_PROMPT_KO = """# Role (역할)
 6. 번역체/영어식 표현 절대 금지 → 한국어로 풀어쓰기
    ("레버리지" → "지렛대 효과", "스케일링" → "규모 확장", "포트폴리오" → "투자 바구니" 또는 괄호 병기)
 7. 3개 이상 항목 나열 시 반드시 <ol> 또는 <ul>로 줄바꿈 정리. 한 문장에 나열 금지.
+8. **할루시네이션 절대 금지 (CRITICAL)**:
+   - 존재하지 않는 통계, 연구 결과, 기관명, 보고서를 절대 날조하지 말 것.
+   - "~에 따르면", "~연구 결과" 등 인용 시 반드시 실존하는 출처만 사용할 것.
+   - 정확한 출처를 모르면 "일반적으로 알려진 바에 따르면", "업계 전문가들의 분석에 의하면" 형태로 작성.
+   - 구체적 수치 인용은 API 페이로드로 주입된 데이터 또는 널리 알려진 공개 통계만 허용.
+   - 가짜 퍼센트(%), 가짜 금액, 가짜 기관명을 지어내는 것은 사이트 신뢰도를 파괴하는 행위임.
+9. **수치 사용 규칙**:
+   - 도입부 데이터 앵커링 수치는 해당 키워드/산업의 공개된 통계만 사용.
+   - 정확한 수치를 모르면 "수십조 원 규모", "과반수 이상" 등 범위형 표현 사용.
+   - "73%", "130조 원" 등 구체적 수치는 검증 가능한 경우에만 사용.
 
 # Output Structure (출력 구조 — 100% 준수)
 반드시 HTML 형식으로 다음 구조를 순서대로 출력하십시오.
@@ -989,6 +1022,12 @@ GOLDEN_POLISH_PROMPT_KO = """아래 블로그 초안을 '업계 탑 전문가의
 10. <strong> 최소 10개, <table> 1개 이상, key-point/tip-box/blockquote 각 1개 이상
 11. HTML 구조 유지. 마크다운 잔재 발견 시 HTML로 교체.
 12. 분량 5,000~7,000자 유지. 군더더기 삭제, 부족하면 데이터 기반 콘텐츠 보강.
+13. **할루시네이션 검증 (CRITICAL — 반드시 수행)**:
+    - 본문에서 "~에 따르면", "~연구", "~보고서", "~조사" 등 인용 표현을 모두 찾아라.
+    - 해당 출처가 실존하는지 확인 불가하면 → "일반적으로 알려진 바에 따르면"으로 교체하거나 문장 삭제.
+    - 구체적 수치(%, 금액, 건수)가 검증 불가하면 → 범위형 표현("수십%", "상당수")으로 교체.
+    - 존재하지 않는 기관명, 학술지명, 법률명이 있으면 즉시 삭제.
+    - Google Helpful Content 기준: 가짜 통계 1개 = 사이트 전체 신뢰도 하락.
 
 초안:
 {draft}
@@ -1332,6 +1371,37 @@ class QualityGate:
         details['visual_blocks'] = f"{visual_types}종 ({pts}/15)"
 
         return total, details
+
+    # ── 신뢰도 검사 (할루시네이션 의심 패턴 감지) ──
+    SUSPICIOUS_PATTERNS = [
+        # 가짜 기관/연구 인용 패턴
+        (r'(?:에 따르면|발표한|조사에서|보고서에|연구에서|분석에 따르면)',
+         'citation', '출처 인용 표현 — 실존 여부 확인 필요'),
+        # 지나치게 구체적인 퍼센트 (소수점 포함)
+        (r'\d{1,2}\.\d+%',
+         'precise_pct', '소수점 퍼센트 — 출처 없으면 날조 가능성'),
+        # "~대학교 연구팀", "~연구소" 등 가짜 기관명
+        (r'(?:대학교|대학|연구소|연구원|학회|협회|재단)\s*(?:의|에서|가|는|연구팀)',
+         'institution', '기관명 인용 — 실존 여부 확인 필요'),
+        # "20XX년 기준" 미래 또는 최신 통계 주장
+        (r'202[5-9]년\s*(?:기준|현재|조사|통계)',
+         'future_stat', '최신 연도 통계 — 검증 가능한 데이터인지 확인'),
+    ]
+
+    def credibility_audit(self, content):
+        """콘텐츠 내 할루시네이션 의심 패턴을 감지하여 경고 목록 반환"""
+        plain = re.sub(r'<[^>]+>', '', content)
+        warnings = []
+        for pattern, tag, desc in self.SUSPICIOUS_PATTERNS:
+            matches = re.findall(pattern, plain)
+            if matches:
+                warnings.append({
+                    'tag': tag,
+                    'count': len(matches),
+                    'desc': desc,
+                    'samples': matches[:3]
+                })
+        return warnings
 
     def validate(self, content, keyword, has_image=False):
         score, details = self.score(content, keyword, has_image)
@@ -3163,6 +3233,20 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
             log.info(f"  앵글: {kw_data['_angle']} / 포맷: {kw_data.get('_format', '')} / 타겟: {kw_data.get('_target', '')}")
         log.info(f"{'='*50}")
 
+        # Step 0.5: 카니발라이제이션 검사
+        cannibal_conflicts = km.check_cannibalization(keyword)
+        cannibal_score = cannibal_conflicts[0][1] if cannibal_conflicts else 0.0
+        if cannibal_conflicts:
+            top_conflict = cannibal_conflicts[0]
+            log.warning(f"  카니발라이제이션 경고: '{top_conflict[0]}' (유사도 {top_conflict[1]})")
+            if cannibal_score >= 0.8:
+                log.warning(f"  → 유사도 {cannibal_score} >= 0.8 — 높은 중복 위험")
+                sb.log_alert(
+                    f"키워드 중복: {keyword}",
+                    f"기존 '{top_conflict[0]}'과 유사도 {top_conflict[1]}. 카니발라이제이션 위험.",
+                    "warning", "cannibal_high"
+                )
+
         # Step 1: AI 글 생성
         content, cost_usd, content_length = cg.generate(
             keyword, intent, category, unique_seed,
@@ -3251,6 +3335,18 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
                 "warning", "quality_low"
             )
 
+        # Step 6.5: 신뢰도 검사 (할루시네이션 의심 패턴)
+        cred_warnings = qg.credibility_audit(content)
+        if cred_warnings:
+            warn_summary = "; ".join(f"{w['tag']}({w['count']}건)" for w in cred_warnings)
+            log.warning(f"  신뢰도 경고: {warn_summary}")
+            sb.log_alert(
+                f"신뢰도 경고: {keyword}",
+                f"할루시네이션 의심 패턴 감지: {warn_summary}. "
+                f"상세: {json.dumps(cred_warnings, ensure_ascii=False)[:500]}",
+                "warning", "credibility_warning"
+            )
+
         # Step 7: 발행
         if dry_run:
             log.info(f"[DRY RUN] 발행 스킵: {title} (품질: {quality_score}/100)")
@@ -3302,6 +3398,7 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
                 "has_image": has_image, "image_source": image_source,
                 "has_coupang": has_coupang,
                 "quality_score": quality_score,
+                "cannibal_score": cannibal_score,
                 "sns_shared": sns_shared,
                 "status": "published"
             })
