@@ -143,6 +143,13 @@ export default function LoginPage() {
           </div>
         )}
       </Card>
+
+      <div style={{ marginTop: 20, textAlign: 'center', fontSize: 13, color: 'var(--text-dim)' }}>
+        처음이신가요?{' '}
+        <a href="/guide" style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}>
+          시작 가이드 보기
+        </a>
+      </div>
     </div>
   );
 }
