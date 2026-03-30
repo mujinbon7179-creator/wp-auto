@@ -88,14 +88,21 @@ export default function OnboardingPage() {
 
       if (existing) {
         // Link existing site to user
-        await supabase.from('sites').update({ owner_id: user.id, wp_url: siteUrl }).eq('id', existing.id);
+        await supabase.from('sites').update({
+          owner_id: user.id, wp_url: siteUrl,
+          config: { wp_username: wpUser, wp_app_password: wpPassword },
+        }).eq('id', existing.id);
         site = existing;
       } else {
         // Create new site
         const newId = `site-${Date.now()}`;
         const { data: created } = await supabase
           .from('sites')
-          .insert({ id: newId, name: domain, domain, wp_url: siteUrl, owner_id: user.id, status: 'active', config: {} })
+          .insert({
+            id: newId, name: domain, domain, wp_url: siteUrl,
+            owner_id: user.id, status: 'active',
+            config: { wp_username: wpUser, wp_app_password: wpPassword },
+          })
           .select().single();
         site = created;
       }
