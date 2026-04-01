@@ -3263,7 +3263,9 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
     log.info("=" * 60)
 
     # 대시보드 스케줄 게이트: 현재 시각이 발행 시간대가 아니면 스킵
-    if not dry_run and not should_run_now():
+    # --force 플래그 시 게이트 무시 (대시보드 수동 실행)
+    force_run = os.environ.get("FORCE_RUN", "false").lower() == "true"
+    if not dry_run and not force_run and not should_run_now():
         return
 
     if not site_override:
@@ -3609,6 +3611,7 @@ def main():
     parser.add_argument("--niche", default="", help="니치/카테고리 필터 (재테크, 투자, 대출 등)")
     parser.add_argument("--polish", action="store_true", help="Claude AI 폴리싱 활성화 (비용 증가)")
     parser.add_argument("--golden", action="store_true", help="골든타임 모드: 고품질 프롬프트 + Claude 폴리싱 + 품질 90+ 기준")
+    parser.add_argument("--force", action="store_true", help="스케줄 게이트 무시 (대시보드 수동 실행용)")
     args = parser.parse_args()
 
     # API 상태 체크 모드

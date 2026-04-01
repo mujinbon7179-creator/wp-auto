@@ -50,6 +50,7 @@ jobs:
       WP_URL: ${{ inputs.wp_url || secrets.WP_URL }}
       WP_USERNAME: ${{ inputs.wp_username || secrets.WP_USERNAME }}
       WP_APP_PASSWORD: ${{ inputs.wp_app_password || secrets.WP_APP_PASSWORD }}
+      FORCE_RUN: ${{ inputs.wp_url && 'true' || 'false' }}
       GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}

@@ -28,7 +28,9 @@ CONTACT_EMAIL = os.environ.get("CONTACT_EMAIL", "")
 if SUPABASE_URL and SUPABASE_KEY and SITE_ID:
     print(f"  Supabase 조회 시도 (site_id={SITE_ID})...")
     try:
-        url = f"{SUPABASE_URL}/rest/v1/dashboard_config?site_id=eq.{SITE_ID}&select=config"
+        from urllib.parse import quote
+        safe_id = quote(SITE_ID, safe='')
+        url = f"{SUPABASE_URL}/rest/v1/dashboard_config?site_id=eq.{safe_id}&select=config"
         resp = requests.get(
             url,
             headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
