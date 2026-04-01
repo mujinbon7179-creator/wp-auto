@@ -25,6 +25,18 @@ on:
         description: '니치/카테고리 필터 (빈값=전체)'
         required: false
         default: ''
+      wp_url:
+        description: 'WordPress URL (from dashboard)'
+        required: false
+      wp_username:
+        description: 'WP username (from dashboard)'
+        required: false
+      wp_app_password:
+        description: 'WP app password (from dashboard)'
+        required: false
+      site_id:
+        description: 'Site ID (from dashboard)'
+        required: false
 
 permissions:
   contents: write
@@ -35,9 +47,9 @@ jobs:
     timeout-minutes: 30
 
     env:
-      WP_URL: ${{ secrets.WP_URL }}
-      WP_USERNAME: ${{ secrets.WP_USERNAME }}
-      WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+      WP_URL: ${{ inputs.wp_url || secrets.WP_URL }}
+      WP_USERNAME: ${{ inputs.wp_username || secrets.WP_USERNAME }}
+      WP_APP_PASSWORD: ${{ inputs.wp_app_password || secrets.WP_APP_PASSWORD }}
       GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
@@ -55,7 +67,7 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      SITE_ID: site-1
+      SITE_ID: ${{ inputs.site_id || 'site-1' }}
 
     steps:
       - name: Checkout

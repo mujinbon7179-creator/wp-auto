@@ -1,14 +1,27 @@
 name: Inject Custom CSS
 on:
   workflow_dispatch:
+    inputs:
+      wp_url:
+        description: 'WordPress URL (from dashboard)'
+        required: false
+      wp_username:
+        description: 'WP username (from dashboard)'
+        required: false
+      wp_app_password:
+        description: 'WP app password (from dashboard)'
+        required: false
+      site_id:
+        description: 'Site ID'
+        required: false
 
 jobs:
   inject:
     runs-on: ubuntu-latest
     env:
-      WP_URL: ${{ secrets.WP_URL }}
-      WP_USERNAME: ${{ secrets.WP_USERNAME }}
-      WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+      WP_URL: ${{ inputs.wp_url || secrets.WP_URL }}
+      WP_USERNAME: ${{ inputs.wp_username || secrets.WP_USERNAME }}
+      WP_APP_PASSWORD: ${{ inputs.wp_app_password || secrets.WP_APP_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
