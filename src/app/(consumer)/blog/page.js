@@ -26,6 +26,14 @@ export default function BlogPage() {
   const [error, setError] = useState(null);
   const [stats, setStats] = useState({ total: 0, avgQuality: 0 });
 
+  // Reset on site change
+  useEffect(() => {
+    setPosts([]);
+    setStats({ total: 0, avgQuality: 0 });
+    setError(null);
+    setLoading(true);
+  }, [siteId]);
+
   useEffect(() => {
     if (!siteId) { setLoading(false); return; }
 

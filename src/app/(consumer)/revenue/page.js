@@ -33,6 +33,16 @@ export default function RevenuePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Reset on site change
+  useEffect(() => {
+    setRevenueData([]);
+    setMonthTotal(0);
+    setPrevMonthTotal(0);
+    setByChannel({});
+    setError(null);
+    setLoading(true);
+  }, [siteId]);
+
   useEffect(() => {
     if (!siteId) { setLoading(false); return; }
 

@@ -26,6 +26,18 @@ export default function ConsumerDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Reset all state when site changes
+  useEffect(() => {
+    setTodayStats({ posts: 0, failures: 0, cost: 0 });
+    setMonthRevenue(0);
+    setPrevMonthRevenue(0);
+    setTotalPosts(0);
+    setRecentPosts([]);
+    setRevenueTrend([]);
+    setError(null);
+    setLoading(true);
+  }, [siteId]);
+
   useEffect(() => {
     if (!siteId) { setLoading(false); return; }
 
