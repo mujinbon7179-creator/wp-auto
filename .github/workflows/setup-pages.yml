@@ -1,0 +1,21 @@
+name: Setup Required Pages
+on:
+  workflow_dispatch:
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    env:
+      WP_URL: ${{ secrets.WP_URL }}
+      WP_USERNAME: ${{ secrets.WP_USERNAME }}
+      WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+      BLOG_OWNER: ${{ secrets.BLOG_OWNER }}
+      BLOG_DESC: ${{ secrets.BLOG_DESC }}
+      CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
+      - run: python scripts/setup_pages.py

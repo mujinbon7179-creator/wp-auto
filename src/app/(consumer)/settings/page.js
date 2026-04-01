@@ -54,6 +54,11 @@ export default function SettingsPage() {
   // First post count
   const [firstPostCount, setFirstPostCount] = useState(3);
 
+  // Page info (About/Privacy/자기소개)
+  const [blogOwner, setBlogOwner] = useState('');
+  const [blogDesc, setBlogDesc] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+
   // Site registration / editing
   const [siteMode, setSiteMode] = useState('view'); // 'view' | 'edit' | 'register'
   const [wpUrl, setWpUrl] = useState('');
@@ -80,6 +85,9 @@ export default function SettingsPage() {
           setDailyCount(dc);
           setScheduleTimes(data.config.schedule_times || DEFAULT_TIMES.slice(0, dc));
           if (data.config.first_post_count) setFirstPostCount(data.config.first_post_count);
+          if (data.config.blog_owner) setBlogOwner(data.config.blog_owner);
+          if (data.config.blog_desc) setBlogDesc(data.config.blog_desc);
+          if (data.config.contact_email) setContactEmail(data.config.contact_email);
         } else {
           setConfig(null);
           setSelectedCats([]);
@@ -308,6 +316,9 @@ export default function SettingsPage() {
             daily_count: dailyCount,
             schedule_times: scheduleTimes.slice(0, dailyCount),
             first_post_count: firstPostCount,
+            blog_owner: blogOwner,
+            blog_desc: blogDesc,
+            contact_email: contactEmail,
           },
         }),
       ]);
@@ -384,80 +395,39 @@ export default function SettingsPage() {
       {/* ── STEP 1: Site Connection ── */}
       <Card style={{ marginBottom: 20 }}>
         <SectionTitle action={
+          /* Connected: show compact with edit option */
           site && siteMode === 'view' ? (
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button onClick={startEdit}
-                style={{ border: 'none', background: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-                수정
-              </button>
-              {sites.length < (plan.maxSites === 999 ? 100 : plan.maxSites) && (
-                <button onClick={startRegister}
-                  style={{ border: 'none', background: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-                  + 추가
-                </button>
-              )}
-            </div>
+            <button onClick={startEdit}
+              style={{ border: 'none', background: 'none', color: 'var(--text-dim)', fontSize: 11, cursor: 'pointer' }}>
+              변경
+            </button>
           ) : null
         }>
           STEP 1 &mdash; 사이트 연결
         </SectionTitle>
 
-        {/* View mode */}
+        {/* Connected — collapsed summary */}
         {site && siteMode === 'view' && (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-              <div style={st.iconCircle}>{'\uD83C\uDF10'}</div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, fontWeight: 600 }}>{site.domain || site.name}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-                  {'\u2705'} 연결됨
-                  {site.domain && (
-                    <a href={`https://${site.domain}`} target="_blank" rel="noopener noreferrer"
-                      style={{ marginLeft: 8, color: 'var(--accent)', textDecoration: 'none' }}>
-                      방문 {'\u2197'}
-                    </a>
-                  )}
-                </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
+            <StepBadge num={1} done={true} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {site.domain || site.name}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--green)' }}>
+                {'\u2705'} 연결됨 &middot; {site.config?.wp_username || ''}
               </div>
             </div>
-
-            {/* Site details table */}
-            <div style={st.detailBox}>
-              <DetailRow label="WordPress URL" value={site.wp_url || '-'} />
-              <DetailRow label="도메인" value={site.domain || '-'} />
-              <DetailRow label="사용자명" value={site.config?.wp_username || '-'} />
-              <DetailRow label="앱 비밀번호" value={site.config?.wp_app_password ? '********' : '-'} />
-              <DetailRow label="등록일" value={site.created_at ? new Date(site.created_at).toLocaleDateString('ko-KR') : '-'} last />
-            </div>
-
-            {/* Other linked sites */}
-            {sites.length > 1 && (
-              <div style={{ marginTop: 12 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', marginBottom: 6 }}>
-                  내 사이트 ({sites.length}개)
-                </div>
-                {sites.map(s => (
-                  <button key={s.id}
-                    onClick={() => setActiveSite(s.id)}
-                    style={{
-                      ...st.siteListItem,
-                      border: s.id === site.id ? '2px solid var(--accent)' : '1px solid var(--border-light)',
-                      background: s.id === site.id ? 'var(--accent-bg)' : 'var(--card)',
-                    }}>
-                    <span style={{ fontSize: 13, fontWeight: s.id === site.id ? 600 : 400, color: 'var(--text)' }}>
-                      {s.domain || s.name}
-                    </span>
-                    {s.id === site.id && (
-                      <Badge text="활성" color="purple" />
-                    )}
-                  </button>
-                ))}
-              </div>
+            {site.domain && (
+              <a href={`https://${site.domain}`} target="_blank" rel="noopener noreferrer"
+                style={{ fontSize: 11, color: 'var(--accent)', textDecoration: 'none', flexShrink: 0 }}>
+                방문 {'\u2197'}
+              </a>
             )}
-          </>
+          </div>
         )}
 
-        {/* Register / Edit mode */}
+        {/* Register / Edit form */}
         {(siteMode === 'register' || siteMode === 'edit') && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {siteMode === 'register' && (
@@ -587,6 +557,35 @@ export default function SettingsPage() {
         </div>
 
         {/* Divider */}
+        <div style={{ height: 1, background: 'var(--card-border)', margin: '4px 0 16px' }} />
+
+        {/* Blog info for required pages */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <StepBadge num={'i'} done={blogOwner && contactEmail} />
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+              기본 정보 (필수 페이지용)
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 36 }}>
+            <div>
+              <label style={st.label}>블로그 운영자명</label>
+              <InputField value={blogOwner} onChange={setBlogOwner} placeholder="홍길동 / My Blog Team" />
+            </div>
+            <div>
+              <label style={st.label}>블로그 소개 (한 줄)</label>
+              <InputField value={blogDesc} onChange={setBlogDesc} placeholder="실생활에 도움이 되는 정보를 공유하는 블로그입니다" />
+            </div>
+            <div>
+              <label style={st.label}>연락처 이메일</label>
+              <InputField value={contactEmail} onChange={setContactEmail} placeholder="contact@example.com" />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+              About, Privacy Policy, Contact 페이지 자동 생성에 사용됩니다.
+            </div>
+          </div>
+        </div>
+
         <div style={{ height: 1, background: 'var(--card-border)', margin: '4px 0 16px' }} />
 
         {/* 2-1~4: Setup Actions (sequential) */}

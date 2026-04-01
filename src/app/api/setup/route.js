@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GITHUB_REPO = process.env.GITHUB_REPO || 'mymiryu-commits/wp-auto';
+const GITHUB_REPO = process.env.GITHUB_REPO || 'planxs-ai/wp-auto';
 
 const ALLOWED_WORKFLOWS = {
   'setup-menu': 'setup-menu.yml',
