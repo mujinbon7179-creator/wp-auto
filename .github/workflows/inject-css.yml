@@ -11,6 +11,9 @@ on:
       wp_app_password:
         description: 'WP app password (from dashboard)'
         required: false
+      wp_login_password:
+        description: 'WP login password (from dashboard)'
+        required: false
       site_id:
         description: 'Site ID'
         required: false
@@ -22,10 +25,14 @@ jobs:
       WP_URL: ${{ inputs.wp_url || secrets.WP_URL }}
       WP_USERNAME: ${{ inputs.wp_username || secrets.WP_USERNAME }}
       WP_APP_PASSWORD: ${{ inputs.wp_app_password || secrets.WP_APP_PASSWORD }}
+      WP_LOGIN_PASSWORD: ${{ inputs.wp_login_password || secrets.WP_LOGIN_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - run: pip install requests
-      - run: python scripts/inject_css.py
+      - name: Customizer CSS 주입 (사이트 전체)
+        run: python scripts/inject_css_customizer.py
+      - name: 기존 글 인라인 CSS 주입 (개별 글)
+        run: python scripts/inject_css_to_posts.py

@@ -7,7 +7,7 @@ const GITHUB_REPO = process.env.GITHUB_REPO || 'planxs-ai/wp-auto';
 const ALLOWED_WORKFLOWS = {
   'setup-menu': 'setup-menu.yml',
   'setup-pages': 'setup-pages.yml',
-  'inject-css': 'inject-css-posts.yml',
+  'inject-css': 'inject-css.yml',
   'publish': 'publish.yml',
 };
 
@@ -84,6 +84,7 @@ export async function POST(request) {
     wp_url: creds.wp_url,
     wp_username: creds.wp_username,
     wp_app_password: creds.wp_app_password,
+    wp_login_password: creds.wp_login_password || creds.wp_app_password,
     site_id: siteId || '',
   };
 

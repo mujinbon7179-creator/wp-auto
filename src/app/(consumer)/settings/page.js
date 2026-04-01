@@ -64,6 +64,7 @@ export default function SettingsPage() {
   const [wpUrl, setWpUrl] = useState('');
   const [wpUser, setWpUser] = useState('');
   const [wpPassword, setWpPassword] = useState('');
+  const [wpLoginPass, setWpLoginPass] = useState('');
   const [siteTestResult, setSiteTestResult] = useState(null);
   const [savingSite, setSavingSite] = useState(false);
 
@@ -163,7 +164,7 @@ export default function SettingsPage() {
       if (existing) {
         await supabase.from('sites').update({
           owner_id: user.id, wp_url: siteUrl,
-          config: { wp_username: wpUser, wp_app_password: wpPassword },
+          config: { wp_username: wpUser, wp_app_password: wpPassword, wp_login_password: wpLoginPass || wpPassword },
         }).eq('id', existing.id);
         newSite = existing;
       } else {
@@ -173,7 +174,7 @@ export default function SettingsPage() {
           .insert({
             id: newId, name: domain, domain, wp_url: siteUrl,
             owner_id: user.id, status: 'active',
-            config: { wp_username: wpUser, wp_app_password: wpPassword },
+            config: { wp_username: wpUser, wp_app_password: wpPassword, wp_login_password: wpLoginPass || wpPassword },
           })
           .select().single();
         newSite = created;
@@ -211,7 +212,7 @@ export default function SettingsPage() {
 
       await supabase.from('sites').update({
         wp_url: siteUrl, domain, name: domain,
-        config: { wp_username: wpUser, wp_app_password: wpPassword },
+        config: { wp_username: wpUser, wp_app_password: wpPassword, wp_login_password: wpLoginPass || wpPassword },
       }).eq('id', site.id);
 
       await refreshSites();
@@ -446,10 +447,17 @@ export default function SettingsPage() {
               <InputField value={wpUser} onChange={setWpUser} placeholder="WordPress 사용자명" />
             </div>
             <div>
-              <label style={st.label}>앱 비밀번호</label>
+              <label style={st.label}>앱 비밀번호 (API용)</label>
               <InputField value={wpPassword} onChange={setWpPassword} placeholder="WordPress 앱 비밀번호" type="password" />
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>
                 WordPress 관리자 &rarr; 사용자 &rarr; 프로필 &rarr; 앱 비밀번호에서 생성
+              </div>
+            </div>
+            <div>
+              <label style={st.label}>관리자 로그인 비밀번호 (CSS 자동 적용용)</label>
+              <InputField value={wpLoginPass} onChange={setWpLoginPass} placeholder="wp-admin 로그인 비밀번호" type="password" />
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>
+                CSS 디자인 자동 적용에 필요합니다. 없으면 앱 비밀번호로 시도합니다.
               </div>
             </div>
 
