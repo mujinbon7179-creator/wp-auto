@@ -6,6 +6,7 @@ const GITHUB_REPO = process.env.GITHUB_REPO || 'mymiryu-commits/wp-auto';
 
 const ALLOWED_WORKFLOWS = {
   'setup-menu': 'setup-menu.yml',
+  'setup-pages': 'setup-pages.yml',
   'inject-css': 'inject-css.yml',
   'publish': 'publish.yml',
 };

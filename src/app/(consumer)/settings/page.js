@@ -8,29 +8,27 @@ import { Card, SectionTitle, Badge, InputField, ActionButton, PillButton } from 
 
 // ── Constants ──
 
-const SCHEDULE_PRESETS = [
-  { id: 'daily2', label: '매일 2회', desc: '08:00, 18:00' },
-  { id: 'daily4', label: '매일 4회', desc: '07/12/17/22시' },
-  { id: 'weekday', label: '평일만', desc: '평일 08:00' },
-  { id: 'custom', label: '직접 설정', desc: 'Premium 전용' },
-];
-
 const SETUP_ACTIONS = [
   { id: 'setup-menu', step: 1, label: '메뉴 자동 설정',
-    desc: 'About, Privacy, Contact 등 필수 페이지 + 네비게이션 메뉴 생성',
+    desc: '선택한 니치 기반 카테고리 + 네비게이션 메뉴 생성',
     icon: '\uD83D\uDCCC', successMsg: '메뉴 설정 완료!' },
-  { id: 'inject-css', step: 2, label: 'CSS 디자인 적용',
-    desc: '블로그 테마에 맞춤 스타일링 자동 적용',
+  { id: 'setup-pages', step: 2, label: '필수 페이지 생성',
+    desc: 'About, Privacy Policy, 자기소개 등 AdSense 필수 페이지',
+    icon: '\uD83D\uDCC4', successMsg: '필수 페이지 생성 완료!' },
+  { id: 'inject-css', step: 3, label: 'CSS 디자인 적용',
+    desc: '모바일 반응형 + 블로그 테마 스타일링 자동 적용',
     icon: '\uD83C\uDFA8', successMsg: 'CSS 적용 완료!' },
-  { id: 'publish', step: 3, label: '첫 글 발행 (3편)',
-    desc: 'AI가 자동으로 3편의 글을 작성하여 발행',
-    icon: '\uD83D\uDCDD', inputs: { count: '3' }, successMsg: '발행 시작!' },
+  { id: 'publish', step: 4, label: '첫 글 발행',
+    desc: 'AI가 선택한 니치로 글을 작성하여 발행',
+    icon: '\uD83D\uDCDD', successMsg: '발행 시작!' },
 ];
+
+const DEFAULT_TIMES = ['07:00', '12:00', '17:00', '22:00', '06:00'];
 
 const STEPS = [
   { id: 1, label: '사이트 연결', icon: '\uD83C\uDF10' },
   { id: 2, label: 'WordPress 설정', icon: '\u2699' },
-  { id: 3, label: '콘텐츠 설정', icon: '\uD83D\uDCC2' },
+  { id: 3, label: '발행 스케줄', icon: '\u23F0' },
 ];
 
 // ── Page ──
@@ -47,8 +45,14 @@ export default function SettingsPage() {
   const [config, setConfig] = useState(null);
   const [saving, setSaving] = useState(false);
   const [nameEdit, setNameEdit] = useState(displayName);
-  const [schedulePreset, setSchedulePreset] = useState('daily2');
   const [selectedCats, setSelectedCats] = useState([]);
+
+  // Schedule: per-slot times
+  const [dailyCount, setDailyCount] = useState(2);
+  const [scheduleTimes, setScheduleTimes] = useState(['07:00', '18:00']);
+
+  // First post count
+  const [firstPostCount, setFirstPostCount] = useState(3);
 
   // Site registration / editing
   const [siteMode, setSiteMode] = useState('view'); // 'view' | 'edit' | 'register'
@@ -69,14 +73,19 @@ export default function SettingsPage() {
       .then(({ data }) => {
         if (data?.config) {
           setConfig(data.config);
-          setSchedulePreset(data.config.schedule_preset || 'daily2');
           setSelectedCats(data.config.niches || []);
           setSetupLog(data.config.setup_log || []);
+          // Schedule
+          const dc = data.config.daily_count || 2;
+          setDailyCount(dc);
+          setScheduleTimes(data.config.schedule_times || DEFAULT_TIMES.slice(0, dc));
+          if (data.config.first_post_count) setFirstPostCount(data.config.first_post_count);
         } else {
           setConfig(null);
-          setSchedulePreset('daily2');
           setSelectedCats([]);
           setSetupLog([]);
+          setDailyCount(2);
+          setScheduleTimes(['07:00', '18:00']);
         }
       });
   }, [site?.id]);
@@ -90,14 +99,17 @@ export default function SettingsPage() {
 
   // ── Step completion ──
   const siteConnected = !!site;
-  const completedSetupIds = useMemo(() => setupLog.map(l => l.action), [setupLog]);
+  const completedSetupIds = useMemo(
+    () => setupLog.filter(l => l.status === 'success').map(l => l.action),
+    [setupLog]
+  );
   const wpSetupDone = SETUP_ACTIONS.every(a => completedSetupIds.includes(a.id));
-  const contentConfigured = selectedCats.length >= 1 && schedulePreset;
+  const scheduleConfigured = dailyCount >= 1 && scheduleTimes.length >= dailyCount;
 
   const currentStepComplete = (stepId) => {
     if (stepId === 1) return siteConnected;
     if (stepId === 2) return wpSetupDone;
-    if (stepId === 3) return contentConfigured;
+    if (stepId === 3) return scheduleConfigured;
     return false;
   };
 
@@ -229,7 +241,10 @@ export default function SettingsPage() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session?.access_token || ''}`,
         },
-        body: JSON.stringify({ action: action.id, siteId: site?.id, inputs: action.inputs || {} }),
+        body: JSON.stringify({
+          action: action.id, siteId: site?.id,
+          inputs: action.id === 'publish' ? { count: String(firstPostCount) } : (action.inputs || {}),
+        }),
       });
       const data = await res.json();
 
@@ -288,7 +303,12 @@ export default function SettingsPage() {
         supabase.from('user_profiles').update({ display_name: nameEdit }).eq('id', user.id),
         supabase.from('dashboard_config').upsert({
           site_id: site.id,
-          config: { ...config, niches: selectedCats, schedule_preset: schedulePreset },
+          config: {
+            ...config, niches: selectedCats,
+            daily_count: dailyCount,
+            schedule_times: scheduleTimes.slice(0, dailyCount),
+            first_post_count: firstPostCount,
+          },
         }),
       ]);
       refreshProfile();
@@ -529,101 +549,19 @@ export default function SettingsPage() {
             {'\uD83D\uDD12'} STEP 1에서 사이트를 먼저 연결해주세요.
           </div>
         )}
-        <p style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 16 }}>
-          순서대로 실행하세요: 메뉴 &rarr; CSS &rarr; 글 발행. 각 작업은 독립적으로 재실행할 수 있습니다.
-        </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {SETUP_ACTIONS.map((action, idx) => {
-            const logEntry = setupLog.find(l => l.action === action.id);
-            const isDone = logEntry?.status === 'success';
-            const isFailed = logEntry?.status === 'failed';
-            const isRunning = setupRunning[action.id];
-            // Previous step must be done (sequential)
-            const prevDone = idx === 0 || setupLog.find(l => l.action === SETUP_ACTIONS[idx - 1].id)?.status === 'success';
 
-            return (
-              <div key={action.id} style={{
-                display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px',
-                borderRadius: 12,
-                border: isDone ? '1px solid var(--green)' : '1px solid var(--border-light)',
-                background: isDone ? 'var(--green-bg)' : 'var(--card)',
-                opacity: prevDone ? 1 : 0.5,
-              }}>
-                {/* Step number */}
-                <div style={{
-                  width: 28, height: 28, borderRadius: 14,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: isDone ? 'var(--green)' : 'var(--border-light)',
-                  color: isDone ? '#fff' : 'var(--text-dim)',
-                  fontSize: 13, fontWeight: 700, flexShrink: 0,
-                }}>
-                  {isDone ? '\u2713' : action.step}
-                </div>
-                <div style={{ fontSize: 20, flexShrink: 0 }}>{action.icon}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{action.label}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                    {isDone && logEntry?.completed_at
-                      ? `${action.successMsg} (${new Date(logEntry.completed_at).toLocaleString('ko-KR')})`
-                      : isFailed
-                        ? `\u274C ${logEntry?.error || '실패'}. 다시 시도해주세요.`
-                        : action.desc}
-                  </div>
-                </div>
-                <ActionButton
-                  variant={isDone ? 'ghost' : 'secondary'}
-                  disabled={isRunning || !prevDone}
-                  onClick={() => runSetupAction(action)}
-                  style={{ fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }}
-                >
-                  {isRunning ? '실행 중...' : isDone ? '재실행' : '실행'}
-                </ActionButton>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-
-      {/* ── STEP 3: Content Settings ── */}
-      <Card style={{ marginBottom: 20, opacity: siteConnected ? 1 : 0.5, pointerEvents: siteConnected ? 'auto' : 'none' }}>
-        <SectionTitle>STEP 3 &mdash; 콘텐츠 설정</SectionTitle>
-
-        {/* Schedule */}
+        {/* 2-0: Niche Selection (니치 = 메뉴 카테고리) */}
         <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>
-            발행 스케줄
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <StepBadge num={0} done={selectedCats.length >= 2} />
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+              니치 선택 (= 블로그 메뉴 카테고리)
+            </div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {SCHEDULE_PRESETS.map(preset => {
-              const locked = preset.id === 'custom' && !isPremiumOrAbove;
-              return (
-                <button key={preset.id} onClick={() => !locked && setSchedulePreset(preset.id)} style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '12px 14px', borderRadius: 10,
-                  border: schedulePreset === preset.id ? '2px solid var(--accent)' : '1px solid var(--border-light)',
-                  background: schedulePreset === preset.id ? 'var(--accent-bg)' : 'var(--card)',
-                  cursor: locked ? 'not-allowed' : 'pointer', opacity: locked ? 0.5 : 1,
-                }}>
-                  <div style={{ textAlign: 'left' }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{preset.label}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{preset.desc}</div>
-                  </div>
-                  {locked && <Badge text="Premium" color="purple" />}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Categories */}
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>
-            카테고리 (최소 2개)
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingLeft: 36 }}>
             {CONSUMER_CATEGORIES.map(group => (
               <div key={group.id}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
                   {group.label}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -640,9 +578,163 @@ export default function SettingsPage() {
                 </div>
               </div>
             ))}
+            <div style={{ fontSize: 11, color: selectedCats.length >= 2 ? 'var(--green)' : 'var(--text-dim)' }}>
+              {selectedCats.length >= 2
+                ? `\u2705 ${selectedCats.length}개 선택 완료`
+                : `최소 2개 선택 필요 (현재 ${selectedCats.length}개)`}
+            </div>
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 10 }}>
-            선택: {selectedCats.length}/{plan.maxCategories === 999 ? '무제한' : plan.maxCategories}개
+        </div>
+
+        {/* Divider */}
+        <div style={{ height: 1, background: 'var(--card-border)', margin: '4px 0 16px' }} />
+
+        {/* 2-1~4: Setup Actions (sequential) */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+          {SETUP_ACTIONS.map((action, idx) => {
+            const logEntry = setupLog.find(l => l.action === action.id);
+            const isDone = logEntry?.status === 'success';
+            const isFailed = logEntry?.status === 'failed';
+            const isRunning = setupRunning[action.id];
+            const nicheReady = selectedCats.length >= 2;
+            const prevDone = idx === 0
+              ? nicheReady
+              : setupLog.find(l => l.action === SETUP_ACTIONS[idx - 1].id)?.status === 'success';
+            const isPublish = action.id === 'publish';
+
+            return (
+              <div key={action.id} style={{
+                display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px',
+                borderRadius: 12,
+                border: isDone ? '1px solid var(--green)' : '1px solid var(--border-light)',
+                background: isDone ? 'var(--green-bg)' : 'var(--card)',
+                opacity: prevDone ? 1 : 0.5,
+              }}>
+                <StepBadge num={action.step} done={isDone} />
+                <div style={{ fontSize: 18, flexShrink: 0 }}>{action.icon}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+                    {isPublish ? `첫 글 발행 (${firstPostCount}편)` : action.label}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                    {isDone && logEntry?.completed_at
+                      ? `${action.successMsg} (${new Date(logEntry.completed_at).toLocaleString('ko-KR')})`
+                      : isFailed
+                        ? `\u274C ${logEntry?.error || '실패'}`
+                        : action.desc}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                  {/* Post count selector for publish action */}
+                  {isPublish && !isDone && (
+                    <select
+                      value={firstPostCount}
+                      onChange={e => setFirstPostCount(Number(e.target.value))}
+                      style={{
+                        padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-light)',
+                        fontSize: 12, background: 'var(--input-bg)', color: 'var(--text)',
+                      }}
+                    >
+                      {[1,2,3,4,5].map(n => (
+                        <option key={n} value={n}>{n}편</option>
+                      ))}
+                    </select>
+                  )}
+                  <ActionButton
+                    variant={isDone ? 'ghost' : 'secondary'}
+                    disabled={isRunning || !prevDone}
+                    onClick={() => runSetupAction(action)}
+                    style={{ fontSize: 12, padding: '6px 12px', whiteSpace: 'nowrap' }}
+                  >
+                    {isRunning ? '실행 중...' : isDone ? '재실행' : '실행'}
+                  </ActionButton>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {/* ── STEP 3: Schedule ── */}
+      <Card style={{ marginBottom: 20, opacity: siteConnected ? 1 : 0.5, pointerEvents: siteConnected ? 'auto' : 'none' }}>
+        <SectionTitle>STEP 3 &mdash; 발행 스케줄</SectionTitle>
+
+        {/* Daily count */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>
+            하루 발행 횟수 (최대 5회)
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {[1,2,3,4,5].map(n => {
+              const maxAllowed = plan.maxDailyPosts === 999 ? 5 : Math.min(plan.maxDailyPosts, 5);
+              const locked = n > maxAllowed;
+              return (
+                <button key={n} onClick={() => {
+                  if (locked) return;
+                  setDailyCount(n);
+                  setScheduleTimes(prev => {
+                    const next = [...prev];
+                    while (next.length < n) next.push(DEFAULT_TIMES[next.length] || '09:00');
+                    return next.slice(0, n);
+                  });
+                }} style={{
+                  width: 52, height: 52, borderRadius: 12,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  border: dailyCount === n ? '2px solid var(--accent)' : '1px solid var(--border-light)',
+                  background: dailyCount === n ? 'var(--accent-bg)' : 'var(--card)',
+                  cursor: locked ? 'not-allowed' : 'pointer',
+                  opacity: locked ? 0.4 : 1,
+                }}>
+                  <span style={{ fontSize: 18, fontWeight: 700, color: dailyCount === n ? 'var(--accent)' : 'var(--text)' }}>{n}</span>
+                  <span style={{ fontSize: 9, color: 'var(--text-dim)' }}>회/일</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Per-slot time pickers */}
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>
+            발행 시간 설정
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {Array.from({ length: dailyCount }, (_, i) => (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                borderRadius: 10, border: '1px solid var(--border-light)', background: 'var(--card)',
+              }}>
+                <div style={{
+                  width: 28, height: 28, borderRadius: 14, background: 'var(--accent-bg)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0,
+                }}>
+                  {i + 1}
+                </div>
+                <div style={{ flex: 1, fontSize: 13, color: 'var(--text)' }}>
+                  {i + 1}회차 발행
+                </div>
+                <input
+                  type="time"
+                  value={scheduleTimes[i] || DEFAULT_TIMES[i] || '09:00'}
+                  onChange={e => {
+                    setScheduleTimes(prev => {
+                      const next = [...prev];
+                      next[i] = e.target.value;
+                      return next;
+                    });
+                  }}
+                  style={{
+                    padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border-light)',
+                    fontSize: 14, fontWeight: 600, background: 'var(--input-bg)', color: 'var(--text)',
+                    width: 110,
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8, padding: '8px 10px', background: 'var(--input-bg)', borderRadius: 8 }}>
+            {'\u23F0'} 시간은 KST(한국 표준시) 기준입니다. 설정 저장 후 다음 발행부터 적용됩니다.
           </div>
         </div>
       </Card>
@@ -721,6 +813,20 @@ export default function SettingsPage() {
 }
 
 // ── Sub-components ──
+
+function StepBadge({ num, done }) {
+  return (
+    <div style={{
+      width: 26, height: 26, borderRadius: 13, flexShrink: 0,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: done ? 'var(--green)' : 'var(--border-light)',
+      color: done ? '#fff' : 'var(--text-dim)',
+      fontSize: 12, fontWeight: 700,
+    }}>
+      {done ? '\u2713' : num}
+    </div>
+  );
+}
 
 function DetailRow({ label, value, last }) {
   return (

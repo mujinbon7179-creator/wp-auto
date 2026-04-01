@@ -47,10 +47,39 @@ body {
 @media (max-width: 768px) {
   .consumer-sidebar { display: none !important; }
   .consumer-mobile-header { display: flex !important; }
-  .consumer-main { margin-left: 0 !important; padding: 16px !important; padding-top: 72px !important; }
+  .consumer-main {
+    margin-left: 0 !important;
+    padding: 12px !important;
+    padding-top: 68px !important;
+    min-width: 0 !important;
+  }
   .grid-responsive { grid-template-columns: 1fr !important; }
+  /* Cards: full-width on mobile */
+  .consumer-main > div { max-width: 100% !important; }
+  /* Tables: horizontal scroll */
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* Stat cards: 2-col on mobile */
+  .consumer-main [style*="grid-template-columns: repeat(auto-fit"] {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 10px !important;
+  }
+  /* Charts: reduce height */
+  .recharts-responsive-container { min-height: 150px !important; }
   /* Manual page responsive */
   .manual-sidebar { display: none !important; }
   .manual-mobile-nav { display: block !important; }
-  .manual-main { padding: 16px !important; }
+  .manual-main { padding: 12px !important; }
+}
+
+@media (max-width: 480px) {
+  .consumer-main {
+    padding: 8px !important;
+    padding-top: 64px !important;
+  }
+  /* Single column stat cards on very small screens */
+  .consumer-main [style*="grid-template-columns: repeat(auto-fit"] {
+    grid-template-columns: 1fr !important;
+  }
+  /* Smaller text */
+  h1 { font-size: 18px !important; }
 }
