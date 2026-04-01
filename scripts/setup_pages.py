@@ -26,21 +26,34 @@ BLOG_DESC = os.environ.get("BLOG_DESC", "")
 CONTACT_EMAIL = os.environ.get("CONTACT_EMAIL", "")
 
 if SUPABASE_URL and SUPABASE_KEY and SITE_ID:
+    print(f"  Supabase 조회 시도 (site_id={SITE_ID})...")
     try:
+        url = f"{SUPABASE_URL}/rest/v1/dashboard_config?site_id=eq.{SITE_ID}&select=config"
         resp = requests.get(
-            f"{SUPABASE_URL}/rest/v1/dashboard_config?site_id=eq.{SITE_ID}&select=config",
+            url,
             headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
             timeout=10
         )
+        print(f"  Supabase 응답: {resp.status_code}")
         rows = resp.json()
+        print(f"  결과: {len(rows)}건")
         if rows and len(rows) > 0:
             cfg = rows[0].get("config", {})
+            print(f"  config 키: {list(cfg.keys())}")
             BLOG_OWNER = cfg.get("blog_owner", "") or BLOG_OWNER
             BLOG_DESC = cfg.get("blog_desc", "") or BLOG_DESC
             CONTACT_EMAIL = cfg.get("contact_email", "") or CONTACT_EMAIL
-            print(f"  Supabase에서 기본정보 로드 완료 (site_id={SITE_ID})")
+            print(f"  로드 완료: owner='{BLOG_OWNER}', email='{CONTACT_EMAIL}'")
+        else:
+            print(f"  dashboard_config에 site_id={SITE_ID} 데이터 없음")
     except Exception as e:
-        print(f"  Supabase 조회 실패: {e} — 환경변수 폴백 사용")
+        print(f"  Supabase 조회 실패: {e}")
+else:
+    missing = []
+    if not SUPABASE_URL: missing.append("SUPABASE_URL")
+    if not SUPABASE_KEY: missing.append("SUPABASE_KEY")
+    if not SITE_ID: missing.append("SITE_ID")
+    print(f"  Supabase 조회 스킵 — 누락: {', '.join(missing)}")
 
 # 최종 폴백
 if not BLOG_OWNER:
