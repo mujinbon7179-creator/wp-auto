@@ -14,8 +14,10 @@ export async function GET() {
 
   const github_repo_custom = !!process.env.GITHUB_REPO && process.env.GITHUB_REPO !== 'planxs-ai/wp-auto';
 
+  const allConfigured = checks.supabase_url && checks.supabase_anon_key && checks.github_token && github_repo_custom;
+
   return NextResponse.json({
-    ok: checks.supabase_url && checks.supabase_anon_key && checks.github_token,
+    ok: allConfigured,
     checks: {
       ...checks,
       github_repo_display: process.env.GITHUB_REPO || 'planxs-ai/wp-auto (기본값)',

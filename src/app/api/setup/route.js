@@ -140,9 +140,18 @@ export async function POST(request) {
   }
 
   const errorBody = await resp.text();
+  const isDefaultRepo = !process.env.GITHUB_REPO || process.env.GITHUB_REPO === 'planxs-ai/wp-auto';
+  const repoGuide = isDefaultRepo
+    ? 'GITHUB_REPO가 기본값입니다. fork한 경우 Vercel 환경변수에 GITHUB_REPO=your-username/wp-auto를 설정하세요.'
+    : null;
+  const tokenGuide = resp.status === 403 || resp.status === 404
+    ? 'GITHUB_TOKEN의 권한을 확인하세요 (repo + workflow 스코프 필요).'
+    : null;
+
   return NextResponse.json({
     error: `GitHub API failed: ${resp.status}`,
     detail: errorBody,
+    guide: repoGuide || tokenGuide || null,
     debug: { repo: GITHUB_REPO, workflow: config.file, site: creds.domain, tokenSet: !!GITHUB_TOKEN },
   }, { status: resp.status });
 }
