@@ -206,8 +206,10 @@ NICHE_GROUP_MAP = {
     "finance-invest": "product",  # 재테크 & 투자
     "side-income": "promo",       # 부업 & 수익화
     "tech-review": "product",     # IT & 테크 리뷰
-    "gov-support": "info",        # 정부지원 & 절세
-    "life-economy": "info",       # 생활 경제
+    "gov-support": "info",        # 정부지원·복지
+    "tax-saving": "info",         # 절세·세금
+    "insurance-finance": "product", # 보험·금융
+    "life-economy": "info",       # 생활비·살림
     # ── 레거시 호환 ──
     "tech": "product", "smart-home": "product",
     "pet": "product", "appliance": "product", "beauty": "product",
@@ -379,6 +381,8 @@ NICHE_DOMAINS = {
     "s-ev": ["전기차", "배터리", "충전인프라", "LFP", "전고체"],
     "s-space": ["누리호", "스타링크", "위성통신", "우주관광"],
     "gov-support": ["정부보조금", "청년정책", "소상공인지원", "창업지원", "고용보험", "육아수당", "주거지원", "긴급생활지원", "국민취업지원", "기초연금"],
+    "tax-saving": ["종합소득세", "부가세", "연말정산", "세금환급", "절세전략", "부양가족공제", "의료비공제", "월세세액공제", "사업소득세", "종소세신고", "세금계산기", "원천징수"],
+    "insurance-finance": ["실손보험", "자동차보험", "건강보험", "암보험", "종신보험", "보험비교", "보험리모델링", "대출금리비교", "신용대출", "전세대출", "주택담보대출", "적금추천"],
     "life-economy": ["생활비절약", "교통비할인", "통신비절감", "공과금절약", "카드혜택", "포인트활용", "알뜰소비", "구독절약", "중고거래", "재테크기초", "가계부", "짠테크"],
     "side-income": ["블로그수익화", "쿠팡파트너스", "스마트스토어", "애드센스", "재능판매", "배달부업", "투잡", "디지털노마드", "N잡러", "크몽프리랜서", "중고거래수익", "부업추천"],
     "finance-invest": ["적금추천", "예금금리비교", "주식입문", "ETF투자", "연금저축", "IRP", "ISA계좌", "보험비교", "실손보험", "자동차보험", "건강보험", "대출금리"],
@@ -2155,6 +2159,18 @@ class WordPressPublisher:
             "Content-Type": "application/json"
         }
 
+    def _get_site_name(self):
+        """WordPress 사이트 이름 조회 (캐싱)"""
+        if hasattr(self, '_site_name_cache'):
+            return self._site_name_cache
+        import requests
+        try:
+            resp = requests.get(f"{self.url}/wp-json", headers=self.headers, timeout=10)
+            self._site_name_cache = resp.json().get("name", "")
+        except Exception:
+            self._site_name_cache = ""
+        return self._site_name_cache
+
     def publish(self, title, content, category="", tags=None,
                 slug="", focus_keyword="", meta_description=""):
         import requests
@@ -2170,12 +2186,16 @@ class WordPressPublisher:
             post_data["slug"] = slug
 
         # Rank Math SEO meta
+        site_name = self._get_site_name()
         seo_meta = {}
         if focus_keyword:
             seo_meta["rank_math_focus_keyword"] = focus_keyword
-            seo_meta["rank_math_title"] = f"{title} | PlanX AI"
+            seo_title_suffix = f" | {site_name}" if site_name else ""
+            seo_meta["rank_math_title"] = f"{title}{seo_title_suffix}"
         if meta_description:
             seo_meta["rank_math_description"] = meta_description
+        # SEO robots: index, follow (명시적 설정)
+        seo_meta["rank_math_robots"] = "a]index,a]follow,a]max-snippet:-1,a]max-image-preview:large,a]max-video-preview:-1"
         if seo_meta:
             post_data["meta"] = seo_meta
 
@@ -2878,9 +2898,45 @@ class ContentFormatter:
         content = self._dashes_to_circled_nums(content)
         content = self._clean_empty_tags(content)
 
+        # Phase 4: Rank Math SEO 최적화
+        content = self._optimize_seo(content, keyword)
+
         style, group = get_niche_style(category) if category else (NICHE_STYLES["product"], "product")
         changes = len(content) - original_len
-        log.info(f"   프리미엄 스타일링 완료: [{style['label']}] 12종 블록 ({changes:+d}자)")
+        log.info(f"   프리미엄 스타일링 완료: [{style['label']}] 12종 블록 + SEO ({changes:+d}자)")
+        return content
+
+    def _optimize_seo(self, content, keyword):
+        """Rank Math SEO 점수 최적화 (80점+ 목표)"""
+        if not keyword:
+            return content
+        import re
+
+        kw_lower = keyword.lower()
+
+        # 1. 첫 문단에 focus keyword 포함 확인 → 없으면 삽입
+        first_p_match = re.search(r'<p[^>]*>(.*?)</p>', content, re.DOTALL)
+        if first_p_match and kw_lower not in first_p_match.group(1).lower():
+            old_p = first_p_match.group(0)
+            inner = first_p_match.group(1)
+            new_p = old_p.replace(inner, f'{inner} <strong>{keyword}</strong>에 대해 알아보겠습니다.')
+            content = content.replace(old_p, new_p, 1)
+
+        # 2. 이미지 alt 태그에 keyword 포함
+        def _add_keyword_alt(match):
+            tag = match.group(0)
+            alt_match = re.search(r'alt="([^"]*)"', tag)
+            if alt_match:
+                current_alt = alt_match.group(1)
+                if kw_lower not in current_alt.lower():
+                    new_alt = f'{current_alt} - {keyword}' if current_alt else keyword
+                    tag = tag.replace(f'alt="{current_alt}"', f'alt="{new_alt}"')
+            else:
+                tag = tag.replace('<img ', f'<img alt="{keyword}" ')
+            return tag
+
+        content = re.sub(r'<img[^>]+>', _add_keyword_alt, content)
+
         return content
 
     def _apply_niche_colors(self, category):
@@ -3443,45 +3499,51 @@ def _get_all_active_sites():
         return []
 
 
-def should_run_now():
-    """대시보드 스케줄 설정과 현재 시각 비교. 해당 안 되면 False."""
+def should_run_now(site_config=None):
+    """사이트별 또는 글로벌 스케줄 설정과 현재 시각 비교. 해당 안 되면 False."""
     if not SUPABASE_URL or not SUPABASE_KEY:
-        return True  # 설정 없으면 항상 실행
-    import requests
-    try:
-        resp = requests.get(
-            f"{SUPABASE_URL}/rest/v1/dashboard_config?id=eq.global",
-            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
-            timeout=10
-        )
-        rows = resp.json()
-        if not rows or len(rows) == 0:
-            return True
-        settings = rows[0].get("settings", {})
-        sel_days = settings.get("selDays")
-        sel_times = settings.get("selTimes")
-        if not sel_days and not sel_times:
-            return True  # 스케줄 미설정 → 항상 실행
-
-        tz_id = settings.get("tz", "KST")
-        tz_offsets = {"KST": 9, "EST": -5, "CST": -6, "PST": -8}
-        offset = tz_offsets.get(tz_id, 9)
-        now = datetime.now(timezone(timedelta(hours=offset)))
-        current_day = now.weekday()  # 0=월 ~ 6=일
-        current_time = now.strftime("%H:%M")
-        # 30분 윈도우 체크
-        current_h, current_m = now.hour, now.minute
-        slot = f"{current_h:02d}:{'00' if current_m < 30 else '30'}"
-
-        if sel_days and current_day not in sel_days:
-            log.info(f"스케줄 게이트: 오늘({current_day})은 발행일이 아닙니다 (설정: {sel_days})")
-            return False
-        if sel_times and slot not in sel_times:
-            log.info(f"스케줄 게이트: 현재({slot})는 발행 시간이 아닙니다 (설정: {sel_times})")
-            return False
         return True
-    except Exception:
-        return True  # 오류 시 안전하게 실행
+
+    import requests
+
+    # 사이트별 스케줄 우선, 없으면 글로벌 폴백
+    settings = {}
+    site_cfg = (site_config or {}).get("config") or {}
+    if site_cfg.get("daily_count") and site_cfg.get("schedule_times"):
+        settings = site_cfg
+    else:
+        try:
+            resp = requests.get(
+                f"{SUPABASE_URL}/rest/v1/dashboard_config?id=eq.global",
+                headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+                timeout=10
+            )
+            rows = resp.json()
+            if rows and len(rows) > 0:
+                settings = rows[0].get("settings", {})
+        except Exception:
+            return True
+
+    sel_days = settings.get("selDays")
+    sel_times = settings.get("selTimes") or settings.get("schedule_times")
+    if not sel_days and not sel_times:
+        return True  # 스케줄 미설정 → 항상 실행
+
+    tz_id = settings.get("tz", "KST")
+    tz_offsets = {"KST": 9, "EST": -5, "CST": -6, "PST": -8}
+    offset = tz_offsets.get(tz_id, 9)
+    now = datetime.now(timezone(timedelta(hours=offset)))
+    current_day = now.weekday()  # 0=월 ~ 6=일
+    current_h, current_m = now.hour, now.minute
+    slot = f"{current_h:02d}:{'00' if current_m < 30 else '30'}"
+
+    if sel_days and current_day not in sel_days:
+        log.info(f"스케줄 게이트: 오늘({current_day})은 발행일이 아닙니다 (설정: {sel_days})")
+        return False
+    if sel_times and slot not in sel_times:
+        log.info(f"스케줄 게이트: 현재({slot})는 발행 시간이 아닙니다 (설정: {sel_times})")
+        return False
+    return True
 
 
 def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None, adsense_mode=False, golden_mode=False, cli_draft_model="", cli_polish_model=""):
@@ -3560,7 +3622,7 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
     # 대시보드 스케줄 게이트: 현재 시각이 발행 시간대가 아니면 스킵
     # --force 플래그 시 게이트 무시 (대시보드 수동 실행)
     force_run = os.environ.get("FORCE_RUN", "false").lower() == "true"
-    if not dry_run and not force_run and not should_run_now():
+    if not dry_run and not force_run and not should_run_now(site_config):
         return
 
     if not site_override:
@@ -3746,6 +3808,9 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
                     "warning", "adsense_violation"
                 )
 
+        # Step 6.7: 내부 링크 자동 삽입 (SEO 강화)
+        content = _insert_internal_links(content, wp, keyword)
+
         # Step 7: 발행
         if dry_run:
             log.info(f"[DRY RUN] 발행 스킵: {title} (품질: {quality_score}/100)")
@@ -3758,7 +3823,13 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
         seo_focus = kw_data.get("focus_keyword", keyword)
         import re as _re
         _plain = _re.sub(r'<[^>]+>', '', content)
-        seo_meta_desc = kw_data.get("meta_description", _plain[:150].strip() + "...")
+        # 메타 설명: 키워드 데이터 우선, 없으면 첫 문장 2~3개 추출 (150~160자)
+        if kw_data.get("meta_description"):
+            seo_meta_desc = kw_data["meta_description"]
+        else:
+            _sentences = [s.strip() for s in _re.split(r'[.!?。]\s+', _plain[:500]) if len(s.strip()) > 10]
+            _desc = ". ".join(_sentences[:3])
+            seo_meta_desc = (_desc[:157] + "...") if len(_desc) > 160 else _desc
 
         result = wp.publish(title, content, category=category,
                            tags=[keyword, category] if category else [keyword],
@@ -3825,7 +3896,119 @@ def run_pipeline(count=5, dry_run=False, pipeline="autoblog", site_override=None
     log.info(f"실행 결과: 성공 {success}편 / 실패 {fail}편 / 총 {len(keywords)}편")
     log.info(f"{'='*60}")
 
+    # SEO: 발행 완료 후 사이트맵 핑 (Google, Bing, IndexNow)
+    if success > 0 and not dry_run:
+        _ping_sitemaps(WP_URL)
+
     _git_commit_used()
+
+
+def _insert_internal_links(content, wp_publisher, current_keyword):
+    """기존 발행 글 중 관련 글 2~3개를 본문 하단에 내부 링크로 삽입"""
+    import requests as _req
+    try:
+        # 최근 발행 글 20개 조회 (현재 글 제외)
+        resp = _req.get(
+            f"{wp_publisher.url}/wp-json/wp/v2/posts?per_page=20&status=publish&orderby=date&order=desc",
+            headers=wp_publisher.headers, timeout=10
+        )
+        if resp.status_code != 200:
+            return content
+        posts = resp.json()
+        if not posts or len(posts) < 2:
+            return content
+
+        # 키워드와 관련 있는 글 필터 (제목에 공통 단어가 2개 이상)
+        current_words = set(current_keyword.lower().split())
+        related = []
+        for p in posts:
+            p_title = p.get("title", {}).get("rendered", "")
+            p_link = p.get("link", "")
+            if not p_title or not p_link:
+                continue
+            p_words = set(p_title.lower().split())
+            common = current_words & p_words
+            if len(common) >= 1 and p_title.lower() != current_keyword.lower():
+                related.append({"title": p_title, "url": p_link, "score": len(common)})
+
+        # 관련도 순 정렬, 없으면 최근 글 3개
+        if related:
+            related.sort(key=lambda x: x["score"], reverse=True)
+            picks = related[:3]
+        else:
+            picks = [{"title": p["title"]["rendered"], "url": p["link"]} for p in posts[:3]]
+
+        if not picks:
+            return content
+
+        # 관련 글 HTML 블록 생성
+        links_html = '\n'.join(
+            f'<li><a href="{p["url"]}">{p["title"]}</a></li>' for p in picks
+        )
+        related_block = (
+            f'\n<div class="related-posts" style="margin-top:32px;padding:20px 24px;'
+            f'background:#f8f9fa;border-radius:12px;border-left:4px solid #d4a853;">'
+            f'\n<h3 style="margin:0 0 12px;font-size:16px;">관련 글 더 읽기</h3>'
+            f'\n<ul style="margin:0;padding-left:20px;">\n{links_html}\n</ul>'
+            f'\n</div>\n'
+        )
+
+        # FAQ 섹션 앞 또는 본문 마지막에 삽입
+        import re
+        faq_match = re.search(r'<div class="faq-section">', content)
+        if faq_match:
+            insert_pos = faq_match.start()
+            content = content[:insert_pos] + related_block + content[insert_pos:]
+        else:
+            content = content + related_block
+
+        log.info(f"  내부 링크 {len(picks)}개 삽입")
+    except Exception as e:
+        log.warning(f"  내부 링크 삽입 실패 (무시): {e}")
+    return content
+
+
+def _ping_sitemaps(wp_url):
+    """발행 완료 후 검색엔진에 사이트맵 변경 알림"""
+    import requests as _req
+    if not wp_url:
+        return
+
+    domain = wp_url.rstrip("/")
+    # Rank Math 사이트맵 우선, WordPress 기본 폴백
+    sitemap_candidates = [
+        f"{domain}/sitemap_index.xml",
+        f"{domain}/wp-sitemap.xml",
+        f"{domain}/sitemap.xml",
+    ]
+
+    sitemap_url = None
+    for candidate in sitemap_candidates:
+        try:
+            r = _req.head(candidate, timeout=5, allow_redirects=True)
+            if r.status_code == 200:
+                sitemap_url = candidate
+                break
+        except Exception:
+            continue
+
+    if not sitemap_url:
+        log.warning("사이트맵을 찾을 수 없습니다.")
+        return
+
+    # Google Ping
+    try:
+        _req.get(f"https://www.google.com/ping?sitemap={sitemap_url}", timeout=10)
+        log.info(f"  Google 사이트맵 핑 완료: {sitemap_url}")
+    except Exception:
+        log.warning("  Google 핑 실패 (무시)")
+
+    # Bing/IndexNow Ping
+    try:
+        _req.get(f"https://www.bing.com/ping?sitemap={sitemap_url}", timeout=10)
+        log.info(f"  Bing 사이트맵 핑 완료")
+    except Exception:
+        log.warning("  Bing 핑 실패 (무시)")
 
 
 def _git_commit_used():
@@ -3866,6 +4049,7 @@ def main():
     parser.add_argument("--force", action="store_true", help="스케줄 게이트 무시 (대시보드 수동 실행용)")
     parser.add_argument("--draft-model", default="", help="초안 모델 (grok/gemini/deepseek)")
     parser.add_argument("--polish-model", default="", help="폴리싱 모델 (grok/claude/claude-haiku/gemini/none)")
+    parser.add_argument("--mode", default="", help="실행 모드 (scheduled=전체 활성 사이트 순회)")
     args = parser.parse_args()
 
     # API 상태 체크 모드
@@ -3892,7 +4076,30 @@ def main():
         run_etf_report(report_type="blog-ready", dry_run=args.dry_run)
         return
 
-    # 특정 사이트 지정
+    # ── scheduled 모드: Supabase에서 전체 활성 사이트 조회 → 순회 발행 ──
+    if args.mode == "scheduled":
+        sites = _get_all_active_sites()
+        if not sites:
+            log.warning("활성 사이트 없음. Supabase sites 테이블을 확인하세요.")
+            sys.exit(0)
+
+        log.info(f"═══ Scheduled Mode: {len(sites)}개 활성 사이트 발행 시작 ═══")
+        for site in sites:
+            site_id = site.get("id", "unknown")
+            domain = site.get("domain", site.get("wp_url", ""))
+            log.info(f"\n▶ [{site_id}] {domain}")
+            try:
+                run_pipeline(
+                    count=args.count, dry_run=args.dry_run, pipeline=args.pipeline,
+                    site_override=site, golden_mode=args.golden,
+                    cli_draft_model=args.draft_model, cli_polish_model=args.polish_model,
+                )
+            except Exception as e:
+                log.error(f"[{site_id}] 파이프라인 실패: {e}")
+        log.info(f"\n═══ Scheduled Mode 완료: {len(sites)}개 사이트 처리 ═══")
+        return
+
+    # ── 특정 사이트 지정 ──
     if args.site_id:
         global SITE_ID
         SITE_ID = args.site_id
@@ -3906,9 +4113,9 @@ def main():
             sys.exit(1)
         return
 
-    # 단일 사이트 모드 (환경변수 기반)
+    # ── 단일 사이트 모드 (환경변수 기반, 레거시 호환) ──
     if not WP_URL:
-        log.error("WP_URL 환경변수 없음. --site-id를 사용하세요.")
+        log.error("WP_URL 환경변수 없음. --site-id 또는 --mode scheduled를 사용하세요.")
         sys.exit(1)
     run_pipeline(count=args.count, dry_run=args.dry_run, pipeline=args.pipeline,
                  adsense_mode=args.adsense_mode, golden_mode=args.golden,

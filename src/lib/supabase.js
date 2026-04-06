@@ -30,7 +30,7 @@ export async function signUp(email, password, displayName) {
     password,
     options: {
       data: { display_name: displayName },
-      emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/dashboard` : undefined,
+      emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/settings` : undefined,
     },
   });
   if (error) throw error;

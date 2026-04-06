@@ -24,7 +24,7 @@ const WORKFLOW_CONFIG = {
   },
   'publish': {
     file: 'publish.yml',
-    inputs: ['wp_url', 'wp_username', 'wp_app_password', 'site_id', 'count', 'dry_run', 'pipeline', 'niche'],
+    inputs: ['site_id', 'count', 'dry_run', 'pipeline', 'niche'],
   },
 };
 
@@ -81,6 +81,20 @@ export async function POST(request) {
   const user = await verifyAuth(request);
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Admin role check — only admin can trigger workflows
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data: profile } = await supabaseAdmin
+    .from('user_profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single();
+  if (profile?.role !== 'admin') {
+    return NextResponse.json({
+      error: '관리자만 워크플로우를 실행할 수 있습니다.',
+      guide: '셀프 호스팅: 첫 번째 가입자가 자동으로 관리자가 됩니다.',
+    }, { status: 403 });
   }
 
   const { action, siteId, inputs } = await request.json();

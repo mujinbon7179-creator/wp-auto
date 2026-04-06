@@ -31,8 +31,14 @@ export default function LoginPage() {
           setLoading(false);
           return;
         }
-        await signUp(email, password, displayName);
-        router.push('/onboarding');
+        const { data } = await signUp(email, password, displayName);
+        // 세션이 바로 생성되면 이메일 인증 비활성화 상태 → 설정으로 이동
+        if (data?.session) {
+          router.push('/settings');
+        } else {
+          // 이메일 인증 필요 → 안내 화면 표시
+          setSignupSuccess(true);
+        }
       }
     } catch (err) {
       const msg = err.message || '오류가 발생했습니다';

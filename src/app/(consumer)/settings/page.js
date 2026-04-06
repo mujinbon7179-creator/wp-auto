@@ -1,38 +1,27 @@
 'use client';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase, signOut } from '@/lib/supabase';
 import { useAuth, useCurrentUser, useUserSites, usePlanFeatures } from '@/lib/auth';
 import { CONSUMER_CATEGORIES } from '@/lib/plan-features';
 import { Card, SectionTitle, Badge, InputField, ActionButton, PillButton } from '@/components/ui';
+import { isCentral } from '@/lib/instance';
 
 // ── Constants ──
 
-const SETUP_ACTIONS = [
-  { id: 'setup-menu', step: 1, label: '메뉴 자동 설정',
-    desc: '선택한 니치 기반 카테고리 + 네비게이션 메뉴 생성',
-    icon: '\uD83D\uDCCC', successMsg: '메뉴 설정 완료!' },
-  { id: 'setup-pages', step: 2, label: '필수 페이지 생성',
-    desc: 'About, Privacy Policy, 자기소개 등 AdSense 필수 페이지',
-    icon: '\uD83D\uDCC4', successMsg: '필수 페이지 생성 완료!' },
-  { id: 'inject-css', step: 3, label: '테마 CSS 적용',
-    desc: '사이트 전체 테마 CSS 업데이트 (PC 너비 + 반응형)',
-    icon: '\uD83C\uDFA8', successMsg: 'CSS 적용 완료!' },
-  { id: 'inject-css-posts', step: 3, label: '기존 글 CSS 업데이트',
-    desc: '기존 글의 인라인 CSS를 최신 버전으로 교체',
-    icon: '\uD83D\uDD04', successMsg: '기존 글 CSS 업데이트 완료!',
-    inputs: { force_update: 'true' } },
-  { id: 'publish', step: 4, label: '첫 글 발행',
-    desc: 'AI가 선택한 니치로 글을 작성하여 발행',
-    icon: '\uD83D\uDCDD', successMsg: '발행 시작!' },
+const SETUP_SEQUENCE = [
+  { id: 'setup-menu', label: '메뉴 설정', icon: '\uD83D\uDCCC' },
+  { id: 'setup-pages', label: '필수 페이지', icon: '\uD83D\uDCC4' },
+  { id: 'inject-css', label: 'CSS 적용', icon: '\uD83C\uDFA8' },
+  { id: 'inject-css-posts', label: '기존 글 CSS', icon: '\uD83D\uDD04', inputs: { force_update: 'true' } },
+  { id: 'publish', label: '첫 글 발행', icon: '\uD83D\uDCDD' },
 ];
 
 const DEFAULT_TIMES = ['07:00', '12:00', '17:00', '22:00', '06:00'];
 
 const STEPS = [
   { id: 1, label: '사이트 연결', icon: '\uD83C\uDF10' },
-  { id: 2, label: 'WordPress 설정', icon: '\u2699' },
-  { id: 3, label: '발행 스케줄', icon: '\u23F0' },
+  { id: 2, label: '블로그 설정', icon: '\u2699' },
 ];
 
 // ── Page ──
@@ -40,7 +29,7 @@ const STEPS = [
 export default function SettingsPage() {
   const router = useRouter();
   const { user, refreshProfile } = useAuth();
-  const { displayName, planId } = useCurrentUser();
+  const { displayName, planId, isAdmin } = useCurrentUser();
   const { plan, isPremiumOrAbove } = usePlanFeatures();
   const { sites, activeSite, setActiveSite, refreshSites, loading: sitesLoading } = useUserSites();
   const site = activeSite;
@@ -51,20 +40,20 @@ export default function SettingsPage() {
   const [nameEdit, setNameEdit] = useState(displayName);
   const [selectedCats, setSelectedCats] = useState([]);
 
-  // Schedule: per-slot times
+  // Schedule
   const [dailyCount, setDailyCount] = useState(2);
   const [scheduleTimes, setScheduleTimes] = useState(['07:00', '18:00']);
 
   // First post count
   const [firstPostCount, setFirstPostCount] = useState(3);
 
-  // Page info (About/Privacy/자기소개)
+  // Blog info
   const [blogOwner, setBlogOwner] = useState('');
   const [blogDesc, setBlogDesc] = useState('');
   const [contactEmail, setContactEmail] = useState('');
 
-  // Site registration / editing
-  const [siteMode, setSiteMode] = useState('view'); // 'view' | 'edit' | 'register'
+  // Site registration
+  const [siteMode, setSiteMode] = useState('view');
   const [wpUrl, setWpUrl] = useState('');
   const [wpUser, setWpUser] = useState('');
   const [wpPassword, setWpPassword] = useState('');
@@ -72,14 +61,28 @@ export default function SettingsPage() {
   const [siteTestResult, setSiteTestResult] = useState(null);
   const [savingSite, setSavingSite] = useState(false);
 
-  // Setup actions (persistent)
+  // Setup actions
   const [setupLog, setSetupLog] = useState([]);
   const [setupRunning, setSetupRunning] = useState({});
+
+  // One-click launch
+  const [launchRunning, setLaunchRunning] = useState(false);
+  const [launchStep, setLaunchStep] = useState(-1); // current index in SETUP_SEQUENCE
+  const [launchResults, setLaunchResults] = useState([]); // { id, status, error? }
+
+  // Monetization
+  const [monetizationStage, setMonetizationStage] = useState(1);
+  const [coupangProducts, setCoupangProducts] = useState([]); // [{name, category, url}]
+  const [tenpingCampaigns, setTenpingCampaigns] = useState([]); // [{name, category, url, cpa}]
+  const [newCoupang, setNewCoupang] = useState({ name: '', category: '', url: '' });
+  const [newTenping, setNewTenping] = useState({ name: '', category: '', url: '', cpa: '' });
+
+  // Site registration error
+  const [siteError, setSiteError] = useState('');
 
   // System health
   const [systemHealth, setSystemHealth] = useState(null);
 
-  // Load system health
   useEffect(() => {
     fetch('/api/health').then(r => r.json()).then(setSystemHealth).catch(() => null);
   }, []);
@@ -99,6 +102,9 @@ export default function SettingsPage() {
           setBlogOwner(data.config.blog_owner || '');
           setBlogDesc(data.config.blog_desc || '');
           setContactEmail(data.config.contact_email || '');
+          setMonetizationStage(data.config.monetization_stage || 1);
+          setCoupangProducts(data.config.coupang_manual_products || []);
+          setTenpingCampaigns(data.config.tenping_campaigns || []);
         } else {
           setConfig(null);
           setSelectedCats([]);
@@ -111,10 +117,12 @@ export default function SettingsPage() {
           setContactEmail('');
         }
         setSetupRunning({});
+        setLaunchRunning(false);
+        setLaunchStep(-1);
+        setLaunchResults([]);
       });
   }, [site?.id]);
 
-  // Site mode: register only if truly no sites after loading, reset to view when site exists
   useEffect(() => {
     if (sitesLoading) return;
     if (site) {
@@ -133,11 +141,11 @@ export default function SettingsPage() {
   const REQUIRED_SETUP_IDS = ['setup-menu', 'setup-pages', 'inject-css', 'publish'];
   const wpSetupDone = REQUIRED_SETUP_IDS.every(id => completedSetupIds.includes(id));
   const scheduleConfigured = dailyCount >= 1 && scheduleTimes.length >= dailyCount;
+  const step2Complete = wpSetupDone && scheduleConfigured;
 
   const currentStepComplete = (stepId) => {
     if (stepId === 1) return siteConnected;
-    if (stepId === 2) return wpSetupDone;
-    if (stepId === 3) return scheduleConfigured;
+    if (stepId === 2) return step2Complete;
     return false;
   };
 
@@ -168,8 +176,6 @@ export default function SettingsPage() {
     try {
       const siteUrl = normalizeUrl(wpUrl);
       const domain = new URL(siteUrl).hostname;
-
-      // Check existing by domain
       const { data: existing } = await supabase
         .from('sites').select('*').eq('domain', domain).single();
 
@@ -198,11 +204,8 @@ export default function SettingsPage() {
           user_id: user.id, site_id: newSite.id, role: 'owner',
         });
         setActiveSite(newSite.id);
-
-        // Mark onboarding complete if first site
         await supabase.from('user_profiles').update({
-          onboarding_completed: true,
-          onboarding_step: 5,
+          onboarding_completed: true, onboarding_step: 5,
         }).eq('id', user.id);
         refreshProfile();
       }
@@ -210,8 +213,9 @@ export default function SettingsPage() {
       await refreshSites();
       setSiteMode('view');
       resetSiteForm();
+      setSiteError('');
     } catch (err) {
-      console.error('Register error:', err);
+      setSiteError(err?.message || '사이트 등록에 실패했습니다. 다시 시도해주세요.');
     }
     setSavingSite(false);
   };
@@ -222,17 +226,16 @@ export default function SettingsPage() {
     try {
       const siteUrl = normalizeUrl(wpUrl);
       const domain = new URL(siteUrl).hostname;
-
       await supabase.from('sites').update({
         wp_url: siteUrl, domain, name: domain,
         config: { wp_username: wpUser, wp_app_password: wpPassword, wp_login_password: wpLoginPass || wpPassword },
       }).eq('id', site.id);
-
       await refreshSites();
       setSiteMode('view');
       resetSiteForm();
+      setSiteError('');
     } catch (err) {
-      console.error('Update error:', err);
+      setSiteError(err?.message || '사이트 정보 변경에 실패했습니다.');
     }
     setSavingSite(false);
   };
@@ -242,6 +245,7 @@ export default function SettingsPage() {
     setWpUrl(site?.wp_url || '');
     setWpUser(site?.config?.wp_username || '');
     setWpPassword(site?.config?.wp_app_password || '');
+    setWpLoginPass(site?.config?.wp_login_password || '');
     setSiteTestResult(null);
   };
 
@@ -254,72 +258,122 @@ export default function SettingsPage() {
     setWpUrl('');
     setWpUser('');
     setWpPassword('');
+    setWpLoginPass('');
     setSiteTestResult(null);
   };
 
-  // ── Setup actions ──
+  // ── Single setup action ──
+
+  const runSingleAction = useCallback(async (actionDef) => {
+    const { data: { session } } = await supabase.auth.getSession();
+
+    let actionInputs = actionDef.inputs || {};
+    if (actionDef.id === 'publish') {
+      actionInputs = { count: String(firstPostCount) };
+    } else if (actionDef.id === 'setup-pages') {
+      actionInputs = { ...actionInputs, blog_owner: blogOwner, blog_desc: blogDesc, contact_email: contactEmail };
+    }
+
+    const res = await fetch('/api/setup', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session?.access_token || ''}`,
+      },
+      body: JSON.stringify({ action: actionDef.id, siteId: site?.id, inputs: actionInputs }),
+    });
+    const data = await res.json();
+    return data;
+  }, [site?.id, firstPostCount, blogOwner, blogDesc, contactEmail]);
+
+  const persistSetupLog = useCallback(async (log) => {
+    if (!site?.id) return;
+    const merged = { ...(config || {}), setup_log: log };
+    setConfig(merged);
+    await supabase.from('dashboard_config').upsert({ site_id: site.id, config: merged });
+  }, [site?.id, config]);
+
+  // ── One-click launch: sequential execution ──
+
+  const handleLaunch = async () => {
+    if (launchRunning) return;
+    setLaunchRunning(true);
+    setLaunchResults([]);
+
+    // Save settings first
+    await saveSettingsInner();
+
+    // Save blog info for setup-pages
+    if (site?.id) {
+      await supabase.from('dashboard_config').upsert({
+        site_id: site.id,
+        config: {
+          ...(config || {}), blog_owner: blogOwner, blog_desc: blogDesc, contact_email: contactEmail,
+          niches: selectedCats, daily_count: dailyCount,
+          schedule_times: scheduleTimes.slice(0, dailyCount), first_post_count: firstPostCount,
+        },
+      });
+    }
+
+    const results = [];
+    let allLog = [...setupLog];
+
+    for (let i = 0; i < SETUP_SEQUENCE.length; i++) {
+      const action = SETUP_SEQUENCE[i];
+      setLaunchStep(i);
+
+      try {
+        const data = await runSingleAction(action);
+        const success = !!data.success;
+        const logEntry = {
+          action: action.id, label: action.label,
+          completed_at: new Date().toISOString(),
+          status: success ? 'success' : 'failed',
+          error: success ? undefined : (data.error || ''),
+        };
+
+        results.push({ id: action.id, status: success ? 'success' : 'failed', error: logEntry.error });
+        setLaunchResults([...results]);
+
+        allLog = [...allLog.filter(l => l.action !== action.id), logEntry];
+        setSetupLog(allLog);
+        await persistSetupLog(allLog);
+
+        if (!success) {
+          break; // stop on failure
+        }
+      } catch {
+        results.push({ id: action.id, status: 'failed', error: '네트워크 오류' });
+        setLaunchResults([...results]);
+        break;
+      }
+    }
+
+    setLaunchStep(-1);
+    setLaunchRunning(false);
+  };
+
+  // ── Individual action run ──
 
   const runSetupAction = async (action) => {
     setSetupRunning(prev => ({ ...prev, [action.id]: true }));
     try {
-      // setup-pages 실행 전 사용자 정보를 먼저 저장 (Supabase에 최신 상태 반영)
       if (action.id === 'setup-pages' && site?.id) {
         await supabase.from('dashboard_config').upsert({
           site_id: site.id,
-          config: {
-            ...(config || {}), blog_owner: blogOwner, blog_desc: blogDesc, contact_email: contactEmail,
-          },
+          config: { ...(config || {}), blog_owner: blogOwner, blog_desc: blogDesc, contact_email: contactEmail },
         });
       }
-
-      const { data: { session } } = await supabase.auth.getSession();
-
-      // 액션별 inputs 구성
-      let actionInputs = action.inputs || {};
-      if (action.id === 'publish') {
-        actionInputs = { count: String(firstPostCount) };
-      } else if (action.id === 'setup-pages') {
-        actionInputs = {
-          ...actionInputs,
-          blog_owner: blogOwner || '',
-          blog_desc: blogDesc || '',
-          contact_email: contactEmail || '',
-        };
-      }
-
-      const res = await fetch('/api/setup', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token || ''}`,
-        },
-        body: JSON.stringify({
-          action: action.id, siteId: site?.id,
-          inputs: actionInputs,
-        }),
-      });
-      const data = await res.json();
-
-      if (data.success) {
-        const logEntry = {
-          action: action.id, label: action.label,
-          completed_at: new Date().toISOString(), status: 'success',
-        };
-        const updatedLog = [...setupLog.filter(l => l.action !== action.id), logEntry];
-        setSetupLog(updatedLog);
-        await persistSetupLog(updatedLog);
-      } else {
-        const debugInfo = data.debug ? ` [repo: ${data.debug.repo}, token: ${data.debug.tokenSet ? 'set' : 'missing'}]` : '';
-        const guideMsg = data.guide ? ` — ${data.guide}` : '';
-        const logEntry = {
-          action: action.id, label: action.label,
-          completed_at: new Date().toISOString(), status: 'failed',
-          error: (data.error || '실패') + debugInfo + guideMsg,
-        };
-        const updatedLog = [...setupLog.filter(l => l.action !== action.id), logEntry];
-        setSetupLog(updatedLog);
-        await persistSetupLog(updatedLog);
-      }
+      const data = await runSingleAction(action);
+      const logEntry = {
+        action: action.id, label: action.label,
+        completed_at: new Date().toISOString(),
+        status: data.success ? 'success' : 'failed',
+        error: data.success ? undefined : ((data.error || '실패') + (data.guide ? ` — ${data.guide}` : '')),
+      };
+      const updatedLog = [...setupLog.filter(l => l.action !== action.id), logEntry];
+      setSetupLog(updatedLog);
+      await persistSetupLog(updatedLog);
     } catch {
       const logEntry = {
         action: action.id, label: action.label,
@@ -332,16 +386,7 @@ export default function SettingsPage() {
     setSetupRunning(prev => ({ ...prev, [action.id]: false }));
   };
 
-  const persistSetupLog = async (log) => {
-    if (!site?.id) return;
-    const merged = { ...(config || {}), setup_log: log };
-    setConfig(merged);
-    await supabase.from('dashboard_config').upsert({
-      site_id: site.id, config: merged,
-    });
-  };
-
-  // ── Content settings ──
+  // ── Settings ──
 
   const toggleCat = (slug) => {
     setSelectedCats(prev =>
@@ -349,29 +394,29 @@ export default function SettingsPage() {
     );
   };
 
-  const saveSettings = async () => {
+  const saveSettingsInner = async () => {
     if (!user || !site?.id) return;
+    await Promise.all([
+      supabase.from('user_profiles').update({ display_name: nameEdit }).eq('id', user.id),
+      supabase.from('dashboard_config').upsert({
+        site_id: site.id,
+        config: {
+          ...config, niches: selectedCats, daily_count: dailyCount,
+          schedule_times: scheduleTimes.slice(0, dailyCount),
+          first_post_count: firstPostCount,
+          blog_owner: blogOwner, blog_desc: blogDesc, contact_email: contactEmail,
+          monetization_stage: monetizationStage,
+          coupang_manual_products: coupangProducts,
+          tenping_campaigns: tenpingCampaigns,
+        },
+      }),
+    ]);
+    refreshProfile();
+  };
+
+  const saveSettings = async () => {
     setSaving(true);
-    try {
-      await Promise.all([
-        supabase.from('user_profiles').update({ display_name: nameEdit }).eq('id', user.id),
-        supabase.from('dashboard_config').upsert({
-          site_id: site.id,
-          config: {
-            ...config, niches: selectedCats,
-            daily_count: dailyCount,
-            schedule_times: scheduleTimes.slice(0, dailyCount),
-            first_post_count: firstPostCount,
-            blog_owner: blogOwner,
-            blog_desc: blogDesc,
-            contact_email: contactEmail,
-          },
-        }),
-      ]);
-      refreshProfile();
-    } catch (err) {
-      console.error('Save error:', err);
-    }
+    try { await saveSettingsInner(); } catch { /* silent */ }
     setSaving(false);
   };
 
@@ -383,6 +428,9 @@ export default function SettingsPage() {
   // ── Render ──
 
   const formReady = wpUrl && wpUser && wpPassword;
+  const nicheReady = selectedCats.length >= 2;
+  const canLaunch = isAdmin || !isCentral(); // admin or self-hosted owner
+  const launchReady = canLaunch && nicheReady && blogOwner && contactEmail;
 
   return (
     <div style={{ maxWidth: 720, margin: '0 auto' }}>
@@ -438,9 +486,8 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      {/* ── STEP 1: Site Connection ── */}
+      {/* ═══ STEP 1: Site Connection ═══ */}
       {site && siteMode === 'view' ? (
-        /* Connected: locked inline bar */
         <div style={{ marginBottom: 20 }}>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10,
@@ -468,12 +515,11 @@ export default function SettingsPage() {
       <Card style={{ marginBottom: 20 }}>
         <SectionTitle>STEP 1 &mdash; 사이트 연결</SectionTitle>
 
-        {/* Register / Edit form */}
         {(siteMode === 'register' || siteMode === 'edit') && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {siteMode === 'register' && (
               <div style={{ padding: 12, background: 'var(--accent-bg)', borderRadius: 10, fontSize: 12, color: 'var(--accent)', fontWeight: 500 }}>
-                {'\uD83C\uDF10'} 새 WordPress 사이트를 연결합니다. 블로그 주소와 앱 비밀번호를 입력하세요.
+                {'\uD83C\uDF10'} WordPress 사이트를 연결합니다. 앱 비밀번호가 필요합니다.
               </div>
             )}
             <div>
@@ -487,19 +533,16 @@ export default function SettingsPage() {
             <div>
               <label style={st.label}>앱 비밀번호 (API용)</label>
               <InputField value={wpPassword} onChange={setWpPassword} placeholder="WordPress 앱 비밀번호" type="password" />
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>
-                WordPress 관리자 &rarr; 사용자 &rarr; 프로필 &rarr; 앱 비밀번호에서 생성
-              </div>
+              <AppPasswordGuide />
             </div>
             <div>
-              <label style={st.label}>관리자 로그인 비밀번호 (CSS 자동 적용용)</label>
+              <label style={st.label}>관리자 로그인 비밀번호 (CSS 자동 적용용, 선택)</label>
               <InputField value={wpLoginPass} onChange={setWpLoginPass} placeholder="wp-admin 로그인 비밀번호" type="password" />
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>
                 CSS 디자인 자동 적용에 필요합니다. 없으면 앱 비밀번호로 시도합니다.
               </div>
             </div>
 
-            {/* Test result */}
             {siteTestResult === 'success' && (
               <div style={{ ...st.testBanner, background: 'var(--green-bg)', color: 'var(--green)' }}>
                 {'\u2705'} 연결 성공! WordPress API가 정상 응답합니다.
@@ -516,10 +559,14 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {/* Actions */}
+            {siteError && (
+              <div style={{ ...st.testBanner, background: 'var(--red-bg)', color: 'var(--red)' }}>
+                {'\u274C'} {siteError}
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: 8 }}>
-              <ActionButton variant="secondary" onClick={testConnection}
-                disabled={!formReady} style={{ flex: 1 }}>
+              <ActionButton variant="secondary" onClick={testConnection} disabled={!formReady} style={{ flex: 1 }}>
                 연결 테스트
               </ActionButton>
               <ActionButton
@@ -535,16 +582,9 @@ export default function SettingsPage() {
                 </ActionButton>
               )}
             </div>
-
-            {siteMode === 'edit' && (
-              <div style={{ padding: 10, background: 'var(--accent-bg)', borderRadius: 8, fontSize: 11, color: 'var(--text-dim)' }}>
-                {'\uD83D\uDCA1'} 블로그 주소를 변경하면 해당 블로그의 데이터로 전환됩니다.
-              </div>
-            )}
           </div>
         )}
 
-        {/* No site, not in register mode */}
         {!site && siteMode === 'view' && (
           <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-dim)' }}>
             <div style={{ fontSize: 36, marginBottom: 12 }}>{'\uD83C\uDF10'}</div>
@@ -560,21 +600,21 @@ export default function SettingsPage() {
       </Card>
       )}
 
-      {/* ── STEP 2: WordPress Setup ── */}
+      {/* ═══ STEP 2: Blog Setup + Launch ═══ */}
       <Card style={{ marginBottom: 20, opacity: siteConnected ? 1 : 0.5, pointerEvents: siteConnected ? 'auto' : 'none' }}>
-        <SectionTitle>STEP 2 &mdash; WordPress 초기 설정</SectionTitle>
+        <SectionTitle>STEP 2 &mdash; 블로그 설정</SectionTitle>
         {!siteConnected && (
           <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 12 }}>
             {'\uD83D\uDD12'} STEP 1에서 사이트를 먼저 연결해주세요.
           </div>
         )}
 
-        {/* 2-0: Niche Selection (니치 = 메뉴 카테고리) */}
+        {/* 2-A: Niche Selection */}
         <div style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <StepBadge num={0} done={selectedCats.length >= 2} />
+            <StepBadge num={'A'} done={nicheReady} />
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
-              니치 선택 (= 블로그 메뉴 카테고리)
+              니치 선택 (블로그 주제)
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingLeft: 36 }}>
@@ -597,28 +637,27 @@ export default function SettingsPage() {
                 </div>
               </div>
             ))}
-            <div style={{ fontSize: 11, color: selectedCats.length >= 2 ? 'var(--green)' : 'var(--text-dim)' }}>
-              {selectedCats.length >= 2
+            <div style={{ fontSize: 11, color: nicheReady ? 'var(--green)' : 'var(--text-dim)' }}>
+              {nicheReady
                 ? `\u2705 ${selectedCats.length}개 선택 완료`
                 : `최소 2개 선택 필요 (현재 ${selectedCats.length}개)`}
             </div>
           </div>
         </div>
 
-        {/* Divider */}
-        <div style={{ height: 1, background: 'var(--card-border)', margin: '4px 0 16px' }} />
+        <Divider />
 
-        {/* Blog info for required pages */}
-        <div style={{ marginBottom: 16 }}>
+        {/* 2-B: Blog info */}
+        <div style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <StepBadge num={'i'} done={blogOwner && contactEmail} />
+            <StepBadge num={'B'} done={blogOwner && contactEmail} />
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
-              기본 정보 (필수 페이지용)
+              기본 정보
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 36 }}>
             <div>
-              <label style={st.label}>블로그 운영자명</label>
+              <label style={st.label}>블로그 운영자명 <span style={{ color: 'var(--red)', fontSize: 11 }}>*필수</span></label>
               <InputField value={blogOwner} onChange={setBlogOwner} placeholder="홍길동 / My Blog Team" />
             </div>
             <div>
@@ -626,170 +665,232 @@ export default function SettingsPage() {
               <InputField value={blogDesc} onChange={setBlogDesc} placeholder="실생활에 도움이 되는 정보를 공유하는 블로그입니다" />
             </div>
             <div>
-              <label style={st.label}>연락처 이메일</label>
+              <label style={st.label}>연락처 이메일 <span style={{ color: 'var(--red)', fontSize: 11 }}>*필수</span></label>
               <InputField value={contactEmail} onChange={setContactEmail} placeholder="contact@example.com" />
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
-              <ActionButton variant="secondary" onClick={saveSettings} disabled={saving}
-                style={{ fontSize: 12, padding: '6px 14px' }}>
-                {saving ? '저장 중...' : '기본 정보 저장'}
-              </ActionButton>
-              <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                About, Privacy Policy, Contact 페이지 생성에 사용
-              </span>
+          </div>
+        </div>
+
+        <Divider />
+
+        {/* 2-C: Schedule */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <StepBadge num={'C'} done={scheduleConfigured} />
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+              발행 스케줄
+            </div>
+          </div>
+          <div style={{ paddingLeft: 36 }}>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                하루 발행 횟수
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {[1,2,3,4,5].map(n => {
+                  const maxAllowed = plan.maxDailyPosts === 999 ? 5 : Math.min(plan.maxDailyPosts, 5);
+                  const locked = n > maxAllowed;
+                  return (
+                    <button key={n} onClick={() => {
+                      if (locked) return;
+                      setDailyCount(n);
+                      setScheduleTimes(prev => {
+                        const next = [...prev];
+                        while (next.length < n) next.push(DEFAULT_TIMES[next.length] || '09:00');
+                        return next.slice(0, n);
+                      });
+                    }} style={{
+                      width: 48, height: 48, borderRadius: 12,
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                      border: dailyCount === n ? '2px solid var(--accent)' : '1px solid var(--border-light)',
+                      background: dailyCount === n ? 'var(--accent-bg)' : 'var(--card)',
+                      cursor: locked ? 'not-allowed' : 'pointer',
+                      opacity: locked ? 0.4 : 1,
+                    }}>
+                      <span style={{ fontSize: 16, fontWeight: 700, color: dailyCount === n ? 'var(--accent)' : 'var(--text)' }}>{n}</span>
+                      <span style={{ fontSize: 8, color: 'var(--text-dim)' }}>회/일</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {Array.from({ length: dailyCount }, (_, i) => (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                  borderRadius: 10, border: '1px solid var(--border-light)', background: 'var(--card)',
+                }}>
+                  <div style={{
+                    width: 24, height: 24, borderRadius: 12, background: 'var(--accent-bg)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 11, fontWeight: 700, color: 'var(--accent)', flexShrink: 0,
+                  }}>
+                    {i + 1}
+                  </div>
+                  <div style={{ flex: 1, fontSize: 12, color: 'var(--text)' }}>{i + 1}회차</div>
+                  <input
+                    type="time"
+                    value={scheduleTimes[i] || DEFAULT_TIMES[i] || '09:00'}
+                    onChange={e => {
+                      setScheduleTimes(prev => {
+                        const next = [...prev];
+                        next[i] = e.target.value;
+                        return next;
+                      });
+                    }}
+                    style={{
+                      padding: '4px 10px', borderRadius: 8, border: '1px solid var(--border-light)',
+                      fontSize: 13, fontWeight: 600, background: 'var(--input-bg)', color: 'var(--text)', width: 100,
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8, padding: '6px 10px', background: 'var(--input-bg)', borderRadius: 8 }}>
+              {'\u23F0'} KST(한국 표준시) 기준. 저장 후 다음 발행부터 적용됩니다.
             </div>
           </div>
         </div>
 
-        <div style={{ height: 1, background: 'var(--card-border)', margin: '4px 0 16px' }} />
+        <Divider />
 
-        {/* 2-1~4: Setup Actions (sequential) */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
-          {SETUP_ACTIONS.map((action, idx) => {
-            const logEntry = setupLog.find(l => l.action === action.id);
-            const isDone = logEntry?.status === 'success';
-            const isFailed = logEntry?.status === 'failed';
-            const isRunning = setupRunning[action.id];
-            const nicheReady = selectedCats.length >= 2;
-            const prevDone = idx === 0
-              ? nicheReady
-              : setupLog.find(l => l.action === SETUP_ACTIONS[idx - 1].id)?.status === 'success';
-            const isPublish = action.id === 'publish';
+        {/* 2-D: One-click Launch OR individual actions */}
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <StepBadge num={'D'} done={wpSetupDone} />
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+              블로그 초기화
+            </div>
+          </div>
 
-            return (
-              <div key={action.id} style={{
-                display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px',
-                borderRadius: 12,
-                border: isDone ? '1px solid var(--green)' : '1px solid var(--border-light)',
-                background: isDone ? 'var(--green-bg)' : 'var(--card)',
-                opacity: prevDone ? 1 : 0.5,
-              }}>
-                <StepBadge num={action.step} done={isDone} />
-                <div style={{ fontSize: 18, flexShrink: 0 }}>{action.icon}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-                    {isPublish ? `첫 글 발행 (${firstPostCount}편)` : action.label}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                    {isDone && logEntry?.completed_at
-                      ? `${action.successMsg} (${new Date(logEntry.completed_at).toLocaleString('ko-KR')})`
-                      : isFailed
-                        ? `\u274C ${logEntry?.error || '실패'}`
-                        : action.desc}
-                  </div>
+          {!canLaunch && (
+            <div style={{ paddingLeft: 36, marginBottom: 16 }}>
+              <div style={{ padding: 14, background: 'var(--input-bg)', borderRadius: 12, fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+                {'\u2139\uFE0F'} 관리자가 발행 스케줄을 관리합니다. 셀프 호스팅을 원하시면 <a href="/guide" style={{ color: 'var(--accent)', fontWeight: 600 }}>설치 가이드</a>를 참고하세요.
+              </div>
+            </div>
+          )}
+
+          {canLaunch && !wpSetupDone && !launchRunning && (
+            <div style={{ paddingLeft: 36, marginBottom: 16 }}>
+              <div style={{ padding: 14, background: 'var(--accent-bg)', borderRadius: 12, marginBottom: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)', marginBottom: 6 }}>
+                  {'\uD83D\uDE80'} "블로그 시작하기" 버튼 하나로 모든 초기 설정이 자동 실행됩니다
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                  {/* Post count selector for publish action */}
-                  {isPublish && !isDone && (
-                    <select
-                      value={firstPostCount}
-                      onChange={e => setFirstPostCount(Number(e.target.value))}
-                      style={{
-                        padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-light)',
-                        fontSize: 12, background: 'var(--input-bg)', color: 'var(--text)',
-                      }}
-                    >
-                      {[1,2,3,4,5].map(n => (
-                        <option key={n} value={n}>{n}편</option>
-                      ))}
-                    </select>
-                  )}
-                  <ActionButton
-                    variant={isDone ? 'ghost' : 'secondary'}
-                    disabled={isRunning || !prevDone}
-                    onClick={() => runSetupAction(action)}
-                    style={{ fontSize: 12, padding: '6px 12px', whiteSpace: 'nowrap' }}
-                  >
-                    {isRunning ? '실행 중...' : isDone ? '재실행' : '실행'}
-                  </ActionButton>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+                  메뉴 설정 &rarr; 필수 페이지 생성 &rarr; CSS 디자인 적용 &rarr; 첫 글 발행까지 순서대로 실행됩니다.
                 </div>
               </div>
-            );
-          })}
-        </div>
-      </Card>
 
-      {/* ── STEP 3: Schedule ── */}
-      <Card style={{ marginBottom: 20, opacity: siteConnected ? 1 : 0.5, pointerEvents: siteConnected ? 'auto' : 'none' }}>
-        <SectionTitle>STEP 3 &mdash; 발행 스케줄</SectionTitle>
-
-        {/* Daily count */}
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>
-            하루 발행 횟수 (최대 5회)
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {[1,2,3,4,5].map(n => {
-              const maxAllowed = plan.maxDailyPosts === 999 ? 5 : Math.min(plan.maxDailyPosts, 5);
-              const locked = n > maxAllowed;
-              return (
-                <button key={n} onClick={() => {
-                  if (locked) return;
-                  setDailyCount(n);
-                  setScheduleTimes(prev => {
-                    const next = [...prev];
-                    while (next.length < n) next.push(DEFAULT_TIMES[next.length] || '09:00');
-                    return next.slice(0, n);
-                  });
-                }} style={{
-                  width: 52, height: 52, borderRadius: 12,
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                  border: dailyCount === n ? '2px solid var(--accent)' : '1px solid var(--border-light)',
-                  background: dailyCount === n ? 'var(--accent-bg)' : 'var(--card)',
-                  cursor: locked ? 'not-allowed' : 'pointer',
-                  opacity: locked ? 0.4 : 1,
-                }}>
-                  <span style={{ fontSize: 18, fontWeight: 700, color: dailyCount === n ? 'var(--accent)' : 'var(--text)' }}>{n}</span>
-                  <span style={{ fontSize: 9, color: 'var(--text-dim)' }}>회/일</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Per-slot time pickers */}
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>
-            발행 시간 설정
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {Array.from({ length: dailyCount }, (_, i) => (
-              <div key={i} style={{
-                display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-                borderRadius: 10, border: '1px solid var(--border-light)', background: 'var(--card)',
-              }}>
-                <div style={{
-                  width: 28, height: 28, borderRadius: 14, background: 'var(--accent-bg)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0,
-                }}>
-                  {i + 1}
-                </div>
-                <div style={{ flex: 1, fontSize: 13, color: 'var(--text)' }}>
-                  {i + 1}회차 발행
-                </div>
-                <input
-                  type="time"
-                  value={scheduleTimes[i] || DEFAULT_TIMES[i] || '09:00'}
-                  onChange={e => {
-                    setScheduleTimes(prev => {
-                      const next = [...prev];
-                      next[i] = e.target.value;
-                      return next;
-                    });
-                  }}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>첫 글</div>
+                <select
+                  value={firstPostCount}
+                  onChange={e => setFirstPostCount(Number(e.target.value))}
                   style={{
-                    padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border-light)',
-                    fontSize: 14, fontWeight: 600, background: 'var(--input-bg)', color: 'var(--text)',
-                    width: 110,
+                    padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-light)',
+                    fontSize: 12, background: 'var(--input-bg)', color: 'var(--text)',
                   }}
-                />
+                >
+                  {[1,2,3,4,5].map(n => (
+                    <option key={n} value={n}>{n}편</option>
+                  ))}
+                </select>
               </div>
-            ))}
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8, padding: '8px 10px', background: 'var(--input-bg)', borderRadius: 8 }}>
-            {'\u23F0'} 시간은 KST(한국 표준시) 기준입니다. 설정 저장 후 다음 발행부터 적용됩니다.
-          </div>
+
+              <ActionButton
+                onClick={handleLaunch}
+                disabled={!launchReady}
+                style={{ width: '100%', padding: '14px 0', fontSize: 15, fontWeight: 700, borderRadius: 14 }}
+              >
+                {'\uD83D\uDE80'} 블로그 시작하기
+              </ActionButton>
+
+              {!launchReady && (
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, textAlign: 'center' }}>
+                  {!nicheReady ? '니치를 2개 이상 선택해주세요' : '운영자명과 이메일을 입력해주세요'}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Launch progress */}
+          {launchRunning && (
+            <div style={{ paddingLeft: 36, marginBottom: 16 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {SETUP_SEQUENCE.map((action, idx) => {
+                  const result = launchResults.find(r => r.id === action.id);
+                  const isCurrent = launchStep === idx;
+                  const isPending = launchStep < idx && !result;
+                  return (
+                    <div key={action.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+                      borderRadius: 10,
+                      border: result?.status === 'success' ? '1px solid var(--green)'
+                        : result?.status === 'failed' ? '1px solid var(--red)'
+                        : isCurrent ? '1px solid var(--accent)'
+                        : '1px solid var(--border-light)',
+                      background: result?.status === 'success' ? 'var(--green-bg)'
+                        : result?.status === 'failed' ? 'var(--red-bg)'
+                        : isCurrent ? 'var(--accent-bg)'
+                        : 'var(--card)',
+                      opacity: isPending ? 0.5 : 1,
+                    }}>
+                      <span style={{ fontSize: 16 }}>{action.icon}</span>
+                      <div style={{ flex: 1, fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                        {action.label}
+                      </div>
+                      <span style={{ fontSize: 12 }}>
+                        {result?.status === 'success' ? '\u2705'
+                          : result?.status === 'failed' ? '\u274C'
+                          : isCurrent ? '\u23F3 실행 중...'
+                          : '\u23F8'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              {launchResults.some(r => r.status === 'failed') && (
+                <div style={{ marginTop: 10, padding: 10, background: 'var(--red-bg)', borderRadius: 8, fontSize: 11, color: 'var(--red)' }}>
+                  {'\u274C'} {launchResults.find(r => r.status === 'failed')?.error || '실행 실패'}. 아래 개별 실행으로 재시도해주세요.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Individual actions (after launch or for re-runs) */}
+          {(wpSetupDone || launchResults.length > 0) && !launchRunning && (
+            <div style={{ paddingLeft: 36 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
+                개별 실행 (재설정 시)
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {SETUP_SEQUENCE.map((action, idx) => {
+                  const logEntry = setupLog.find(l => l.action === action.id);
+                  const isDone = logEntry?.status === 'success';
+                  const isRunning = setupRunning[action.id];
+                  return (
+                    <div key={action.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                      borderRadius: 8, border: '1px solid var(--border-light)', background: 'var(--card)',
+                    }}>
+                      <span style={{ fontSize: 14 }}>{action.icon}</span>
+                      <div style={{ flex: 1, fontSize: 12, color: 'var(--text)' }}>{action.label}</div>
+                      {isDone && <span style={{ fontSize: 10, color: 'var(--green)' }}>{'\u2705'}</span>}
+                      <ActionButton
+                        variant="ghost"
+                        disabled={isRunning}
+                        onClick={() => runSetupAction(action)}
+                        style={{ fontSize: 11, padding: '4px 10px' }}
+                      >
+                        {isRunning ? '...' : isDone ? '재실행' : '실행'}
+                      </ActionButton>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </Card>
 
@@ -824,6 +925,143 @@ export default function SettingsPage() {
         </Card>
       )}
 
+      {/* ═══ STEP 3: Monetization ═══ */}
+      {siteConnected && wpSetupDone && (
+        <Card style={{ marginBottom: 20 }}>
+          <SectionTitle>수익화 설정</SectionTitle>
+
+          {/* Stage selector */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>
+              수익화 단계
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {[
+                { stage: 1, label: 'Stage 1', desc: 'AdSense 승인 준비', color: 'var(--blue)' },
+                { stage: 2, label: 'Stage 2', desc: '수익화 시작', color: 'var(--green)' },
+                { stage: 3, label: 'Stage 3', desc: '수익 극대화', color: 'var(--accent)' },
+              ].map(s => (
+                <button key={s.stage} onClick={() => setMonetizationStage(s.stage)} style={{
+                  flex: 1, minWidth: 100, padding: '12px 10px', borderRadius: 12, cursor: 'pointer',
+                  border: monetizationStage === s.stage ? `2px solid ${s.color}` : '1px solid var(--border-light)',
+                  background: monetizationStage === s.stage ? `${s.color}10` : 'var(--card)',
+                  textAlign: 'center',
+                }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: monetizationStage === s.stage ? s.color : 'var(--text)' }}>
+                    {s.label}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>{s.desc}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8, padding: '8px 10px', background: 'var(--input-bg)', borderRadius: 8, lineHeight: 1.6 }}>
+              {monetizationStage === 1 && 'Stage 1: 고품질 글만 발행 (85점+). 제휴 링크 없음. AdSense 승인 후 Stage 2로 전환하세요.'}
+              {monetizationStage === 2 && 'Stage 2: 쿠팡/텐핑 제휴 링크 자동 삽입 시작. 아래에서 상품/캠페인을 등록하세요.'}
+              {monetizationStage === 3 && 'Stage 3: 최대 수익 모드. 전환 키워드 비중 높음 + 쿠팡 API 딥링크.'}
+            </div>
+          </div>
+
+          {/* Coupang Products (Stage 2+) */}
+          {monetizationStage >= 2 && (
+            <>
+              <Divider />
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>
+                  {'\uD83D\uDED2'} 쿠팡 파트너스 상품
+                </div>
+                {coupangProducts.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+                    {coupangProducts.map((p, i) => (
+                      <div key={i} style={{
+                        display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                        borderRadius: 8, border: '1px solid var(--border-light)', background: 'var(--card)',
+                      }}>
+                        <div style={{ flex: 1, fontSize: 12 }}>
+                          <span style={{ fontWeight: 600, color: 'var(--text)' }}>{p.name}</span>
+                          <span style={{ color: 'var(--text-dim)', marginLeft: 6 }}>({p.category})</span>
+                        </div>
+                        <button onClick={() => setCoupangProducts(prev => prev.filter((_, j) => j !== i))}
+                          style={{ border: 'none', background: 'none', color: 'var(--red)', fontSize: 14, cursor: 'pointer' }}>
+                          {'\u2716'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <InputField value={newCoupang.name} onChange={v => setNewCoupang(p => ({ ...p, name: v }))}
+                    placeholder="상품명" style={{ flex: 1, minWidth: 100 }} />
+                  <InputField value={newCoupang.category} onChange={v => setNewCoupang(p => ({ ...p, category: v }))}
+                    placeholder="카테고리" style={{ flex: 1, minWidth: 80 }} />
+                  <InputField value={newCoupang.url} onChange={v => setNewCoupang(p => ({ ...p, url: v }))}
+                    placeholder="쿠팡 파트너스 링크" style={{ flex: 2, minWidth: 150 }} />
+                  <ActionButton variant="secondary" onClick={() => {
+                    if (newCoupang.name && newCoupang.url) {
+                      setCoupangProducts(prev => [...prev, { ...newCoupang }]);
+                      setNewCoupang({ name: '', category: '', url: '' });
+                    }
+                  }} style={{ fontSize: 12, padding: '6px 12px', whiteSpace: 'nowrap' }}>
+                    추가
+                  </ActionButton>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6 }}>
+                  쿠팡 파트너스에서 딥링크를 생성하여 붙여넣으세요. 글 발행 시 관련 키워드에 자동 삽입됩니다.
+                </div>
+              </div>
+
+              {/* Tenping Campaigns */}
+              <Divider />
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>
+                  {'\uD83D\uDCB0'} 텐핑 CPA 캠페인
+                </div>
+                {tenpingCampaigns.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+                    {tenpingCampaigns.map((c, i) => (
+                      <div key={i} style={{
+                        display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                        borderRadius: 8, border: '1px solid var(--border-light)', background: 'var(--card)',
+                      }}>
+                        <div style={{ flex: 1, fontSize: 12 }}>
+                          <span style={{ fontWeight: 600, color: 'var(--text)' }}>{c.name}</span>
+                          <span style={{ color: 'var(--text-dim)', marginLeft: 6 }}>({c.category})</span>
+                          {c.cpa && <span style={{ color: 'var(--green)', marginLeft: 6 }}>{c.cpa}원/건</span>}
+                        </div>
+                        <button onClick={() => setTenpingCampaigns(prev => prev.filter((_, j) => j !== i))}
+                          style={{ border: 'none', background: 'none', color: 'var(--red)', fontSize: 14, cursor: 'pointer' }}>
+                          {'\u2716'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <InputField value={newTenping.name} onChange={v => setNewTenping(p => ({ ...p, name: v }))}
+                    placeholder="캠페인명" style={{ flex: 1, minWidth: 100 }} />
+                  <InputField value={newTenping.category} onChange={v => setNewTenping(p => ({ ...p, category: v }))}
+                    placeholder="카테고리" style={{ flex: 1, minWidth: 80 }} />
+                  <InputField value={newTenping.url} onChange={v => setNewTenping(p => ({ ...p, url: v }))}
+                    placeholder="텐핑 링크" style={{ flex: 2, minWidth: 150 }} />
+                  <InputField value={newTenping.cpa} onChange={v => setNewTenping(p => ({ ...p, cpa: v }))}
+                    placeholder="CPA(원)" style={{ width: 80 }} />
+                  <ActionButton variant="secondary" onClick={() => {
+                    if (newTenping.name && newTenping.url) {
+                      setTenpingCampaigns(prev => [...prev, { ...newTenping }]);
+                      setNewTenping({ name: '', category: '', url: '', cpa: '' });
+                    }
+                  }} style={{ fontSize: 12, padding: '6px 12px', whiteSpace: 'nowrap' }}>
+                    추가
+                  </ActionButton>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6 }}>
+                  텐핑에서 캠페인 URL을 복사하여 등록하세요. 관련 글에 CPA 링크가 자동 삽입됩니다.
+                </div>
+              </div>
+            </>
+          )}
+        </Card>
+      )}
+
       {/* ── Profile ── */}
       <Card style={{ marginBottom: 20 }}>
         <SectionTitle>내 정보</SectionTitle>
@@ -834,9 +1072,7 @@ export default function SettingsPage() {
           </div>
           <div>
             <label style={st.label}>이메일</label>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)', padding: '10px 0' }}>
-              {user?.email}
-            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', padding: '10px 0' }}>{user?.email}</div>
           </div>
           <div>
             <label style={st.label}>플랜</label>
@@ -856,42 +1092,21 @@ export default function SettingsPage() {
       {/* ── System Status ── */}
       {systemHealth && !systemHealth.ok && (
         <Card style={{ marginBottom: 20, border: '1px solid var(--red)', background: 'rgba(239,68,68,0.04)' }}>
-          <SectionTitle>
-            {'\u26A0\uFE0F'} 시스템 설정 필요
-          </SectionTitle>
+          <SectionTitle>{'\u26A0\uFE0F'} 시스템 설정 필요</SectionTitle>
           <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
-            WordPress 자동화 기능을 사용하려면 아래 환경변수를 Vercel (또는 호스팅 플랫폼)에 설정해야 합니다.
+            자동화 기능을 사용하려면 아래 환경변수를 Vercel에 설정해야 합니다.
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <SystemCheckRow
-              label="GITHUB_TOKEN"
-              ok={systemHealth.checks.github_token}
-              desc="GitHub Personal Access Token (repo + workflow 권한)"
-            />
-            <SystemCheckRow
-              label="GITHUB_REPO"
-              ok={systemHealth.checks.github_repo_custom}
+            <SystemCheckRow label="GITHUB_TOKEN" ok={systemHealth.checks.github_token}
+              desc="GitHub Personal Access Token (repo + workflow 권한)" />
+            <SystemCheckRow label="GITHUB_REPO" ok={systemHealth.checks.github_repo_custom}
               desc={systemHealth.checks.github_repo_display}
               warn={!systemHealth.checks.github_repo_custom}
-              warnMsg="기본값 사용 중 — fork한 경우 본인 저장소로 변경 필요"
-            />
-            <SystemCheckRow
-              label="SUPABASE_URL"
-              ok={systemHealth.checks.supabase_url}
-              desc="Supabase 프로젝트 URL"
-            />
-            <SystemCheckRow
-              label="SUPABASE_ANON_KEY"
-              ok={systemHealth.checks.supabase_anon_key}
-              desc="Supabase Anonymous Key"
-            />
-          </div>
-          <div style={{ marginTop: 14, padding: 12, background: 'var(--input-bg)', borderRadius: 10, fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.7 }}>
-            <strong>셀프 호스팅 설정 가이드:</strong><br/>
-            1. GitHub에서 repo를 fork<br/>
-            2. Settings &rarr; Developer Settings &rarr; Personal Access Token 생성 (repo, workflow 권한)<br/>
-            3. Vercel에 배포 후 환경변수 설정: GITHUB_TOKEN, GITHUB_REPO=your-username/wp-auto<br/>
-            4. Fork한 repo의 Settings &rarr; Secrets에 WP 인증정보 등록
+              warnMsg="기본값 사용 중 - fork한 경우 본인 저장소로 변경 필요" />
+            <SystemCheckRow label="SUPABASE_URL" ok={systemHealth.checks.supabase_url}
+              desc="Supabase 프로젝트 URL" />
+            <SystemCheckRow label="SUPABASE_ANON_KEY" ok={systemHealth.checks.supabase_anon_key}
+              desc="Supabase Anonymous Key" />
           </div>
         </Card>
       )}
@@ -918,23 +1133,40 @@ function StepBadge({ num, done }) {
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: done ? 'var(--green)' : 'var(--border-light)',
       color: done ? '#fff' : 'var(--text-dim)',
-      fontSize: 12, fontWeight: 700,
+      fontSize: 11, fontWeight: 700,
     }}>
       {done ? '\u2713' : num}
     </div>
   );
 }
 
-function DetailRow({ label, value, last }) {
+function Divider() {
+  return <div style={{ height: 1, background: 'var(--card-border)', margin: '4px 0 16px' }} />;
+}
+
+function AppPasswordGuide() {
+  const [open, setOpen] = useState(false);
   return (
-    <div style={{
-      display: 'flex', justifyContent: 'space-between', padding: '8px 0',
-      borderBottom: last ? 'none' : '1px solid var(--card-border)',
-    }}>
-      <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{label}</span>
-      <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 500, maxWidth: '60%', textAlign: 'right', wordBreak: 'break-all' }}>
-        {value}
-      </span>
+    <div style={{ marginTop: 4 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{ border: 'none', background: 'none', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+      >
+        {open ? '가이드 닫기' : '앱 비밀번호 만드는 방법'}
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, padding: 12, background: 'var(--input-bg)', borderRadius: 10, fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.8 }}>
+          <strong>WordPress 앱 비밀번호 생성 방법:</strong><br/>
+          1. WordPress 관리자 페이지 접속 (yoursite.com/wp-admin)<br/>
+          2. 좌측 메뉴 "사용자" &rarr; "프로필"<br/>
+          3. 페이지 하단 "앱 비밀번호" 섹션<br/>
+          4. 새 앱 이름 입력 (예: "AutoBlog") &rarr; "새 앱 비밀번호 추가"<br/>
+          5. 생성된 비밀번호 복사 (공백 포함 전체 복사)<br/>
+          <div style={{ marginTop: 6, padding: 8, background: 'var(--accent-bg)', borderRadius: 6, color: 'var(--accent)' }}>
+            {'\uD83D\uDCA1'} 앱 비밀번호가 보이지 않으면 HTTPS 또는 Application Passwords 플러그인이 필요합니다.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -942,17 +1174,16 @@ function DetailRow({ label, value, last }) {
 function SystemCheckRow({ label, ok, desc, warn, warnMsg }) {
   return (
     <div style={{
-      display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 12px',
-      borderRadius: 8, background: ok && !warn ? 'var(--green-bg)' : 'var(--input-bg)',
+      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+      borderRadius: 8, background: ok ? 'var(--green-bg)' : 'var(--red-bg)',
     }}>
-      <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>
-        {ok && !warn ? '\u2705' : warn ? '\u26A0\uFE0F' : '\u274C'}
-      </span>
+      <span style={{ fontSize: 14 }}>{ok ? '\u2705' : '\u274C'}</span>
       <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: 'monospace' }}>{label}</div>
-        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-          {warn ? warnMsg : ok ? desc : '미설정'}
-        </div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{label}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{desc}</div>
+        {warn && warnMsg && (
+          <div style={{ fontSize: 10, color: 'var(--accent)', marginTop: 2 }}>{'\u26A0\uFE0F'} {warnMsg}</div>
+        )}
       </div>
     </div>
   );
@@ -961,20 +1192,10 @@ function SystemCheckRow({ label, ok, desc, warn, warnMsg }) {
 // ── Styles ──
 
 const st = {
-  label: { display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 },
-  iconCircle: {
-    width: 40, height: 40, borderRadius: 10, background: 'var(--accent-bg)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20,
-  },
-  detailBox: {
-    padding: '4px 14px', background: 'var(--input-bg)', borderRadius: 10,
+  label: {
+    fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4,
   },
   testBanner: {
-    padding: '10px 14px', borderRadius: 10, fontSize: 12, fontWeight: 500,
-  },
-  siteListItem: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    width: '100%', padding: '10px 14px', borderRadius: 10, cursor: 'pointer',
-    marginBottom: 4, background: 'var(--card)', transition: 'all 0.15s',
+    padding: '10px 14px', borderRadius: 8, fontSize: 12, fontWeight: 500,
   },
 };

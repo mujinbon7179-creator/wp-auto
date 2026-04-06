@@ -3,14 +3,13 @@ import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { AuthProvider, useAuth, useCurrentUser, usePlanFeatures, useUserSites } from '@/lib/auth';
 import { Badge } from '@/components/ui';
+import { isCentral } from '@/lib/instance';
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: '홈', icon: '◎', path: '/dashboard' },
   { id: 'blog', label: '내 블로그', icon: '▣', path: '/blog' },
   { id: 'revenue', label: '수익', icon: '☆', path: '/revenue' },
-  { id: 'setup-guide', label: '셋업 가이드', icon: '▦', path: '/setup-guide' },
   { id: 'guide', label: '가이드', icon: '📖', path: '/guide' },
-  { id: 'manual', label: '설치 매뉴얼', icon: '📋', path: '/manual' },
   { id: 'settings', label: '설정', icon: '⚙', path: '/settings' },
 ];
 
@@ -110,7 +109,7 @@ function ConsumerShell({ children }) {
                   </button>
                 ))}
                 <button
-                  onClick={() => { router.push('/onboarding?addSite=true'); setSiteDropdownOpen(false); }}
+                  onClick={() => { router.push('/settings?addSite=true'); setSiteDropdownOpen(false); }}
                   style={{ ...styles.siteDropdownItem, color: 'var(--accent)', fontWeight: 600 }}
                 >
                   + {'새 사이트 추가'}
@@ -141,7 +140,7 @@ function ConsumerShell({ children }) {
             );
           })}
 
-          {actualPlanId === 'standard' && (
+          {isCentral() && actualPlanId === 'standard' && (
             <button
               onClick={() => router.push('/upgrade')}
               style={{ ...styles.navItem, ...styles.upgradeBtn }}

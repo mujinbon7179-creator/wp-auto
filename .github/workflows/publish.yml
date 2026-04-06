@@ -1,16 +1,17 @@
-name: AutoBlog Publish (Per-Site)
+name: AutoBlog Publish
 
 on:
   schedule:
-    # 하루 4회 분산 발행 (KST 07:00, 12:00, 17:00, 22:00)
-    - cron: '0 22 * * *'   # KST 07:00 (출근길)
-    - cron: '0 3 * * *'    # KST 12:00 (점심)
-    - cron: '0 8 * * *'    # KST 17:00 (퇴근길)
-    - cron: '0 13 * * *'   # KST 22:00 (야간)
+    # planx-ai: 08:00, 20:00 / bomissu: 08:30, 12:30, 19:30 (30분 오프셋으로 과부하 분산)
+    - cron: '0 23 * * *'    # KST 08:00 (planx-ai)
+    - cron: '30 23 * * *'   # KST 08:30 (bomissu)
+    - cron: '30 3 * * *'    # KST 12:30 (bomissu)
+    - cron: '30 10 * * *'   # KST 19:30 (bomissu)
+    - cron: '0 11 * * *'    # KST 20:00 (planx-ai)
   workflow_dispatch:
     inputs:
       count:
-        description: '발행 편수'
+        description: '발행 편수 (사이트별)'
         required: false
         default: '3'
       dry_run:
@@ -26,7 +27,7 @@ on:
         required: false
         default: ''
       site_id:
-        description: 'Site ID (빈값=전체 관리 사이트)'
+        description: 'Site ID (빈값=전체 활성 사이트)'
         required: false
         default: ''
 
@@ -38,15 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    strategy:
-      fail-fast: false
-      matrix:
-        site: ${{ inputs.site_id != '' && fromJson(format('["{0}"]', inputs.site_id)) || fromJson('["site-1","site-2","site-3"]') }}
-
     env:
-      WP_URL: ${{ secrets.WP_URL }}
-      WP_USERNAME: ${{ secrets.WP_USERNAME }}
-      WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
       GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
@@ -64,7 +57,6 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      SITE_ID: ${{ matrix.site }}
 
     steps:
       - name: Checkout
@@ -80,21 +72,31 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run AutoBlog Engine (${{ matrix.site }})
+      - name: Run AutoBlog Engine
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             COUNT="${{ github.event.inputs.count || '3' }}"
             DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
             PIPELINE="${{ github.event.inputs.pipeline || 'autoblog' }}"
             NICHE="${{ github.event.inputs.niche || '' }}"
+            SITE_ID="${{ github.event.inputs.site_id || '' }}"
           else
             COUNT="1"
             DRY_RUN="false"
             PIPELINE="autoblog"
             NICHE=""
+            SITE_ID=""
           fi
 
-          ARGS="--site-id ${{ matrix.site }} --count $COUNT --pipeline $PIPELINE --golden"
+          ARGS="--count $COUNT --pipeline $PIPELINE --golden"
+
+          # site_id 지정 시 단일 사이트, 미지정 시 전체 활성 사이트 순회
+          if [ -n "$SITE_ID" ]; then
+            ARGS="$ARGS --site-id $SITE_ID"
+          else
+            ARGS="$ARGS --mode scheduled"
+          fi
+
           if [ "$DRY_RUN" = "true" ]; then
             ARGS="$ARGS --dry-run"
           fi
@@ -111,5 +113,5 @@ jobs:
           git config user.name "AutoBlog Bot"
           git pull --rebase || true
           git add data/used_keywords.json || true
-          git diff --staged --quiet || git commit -m "chore: update used keywords $(date +%Y-%m-%d) [${{ matrix.site }}]"
+          git diff --staged --quiet || git commit -m "chore: update used keywords $(date +%Y-%m-%d)"
           git push || true

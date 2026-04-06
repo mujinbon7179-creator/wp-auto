@@ -1,10 +1,10 @@
 name: Golden AutoBlog + ETF Report
 
 on:
-  schedule:
-    # 하루 2회 고품질 발행 (KST 09:00, 20:00)
-    - cron: '0 0 * * *'    # KST 09:00 (오전)
-    - cron: '0 11 * * *'   # KST 20:00 (야간)
+  # 스케줄 비활성화 — publish.yml로 통합됨 (수동 실행만 가능)
+  # schedule:
+  #   - cron: '0 0 * * *'    # KST 09:00
+  #   - cron: '0 11 * * *'   # KST 20:00
   workflow_dispatch:
     inputs:
       count:

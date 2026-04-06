@@ -835,19 +835,28 @@ function NicheTab({ selNiches, toggleNiche, siteId }) {
     setPubMsg('');
     try {
       const nicheParam = selNiches.length === 1 ? selNiches[0] : '';
-      const resp = await fetch('/api/publish', {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const resp = await fetch('/api/setup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count, pipeline: 'autoblog', dry_run: dryRun, niche: nicheParam }),
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          action: 'publish',
+          siteId: siteId || '',
+          inputs: { count: String(count), pipeline: 'autoblog', dry_run: dryRun ? 'true' : 'false', niche: nicheParam },
+        }),
       });
       const data = await resp.json();
       if (resp.ok) {
         setPubStatus('success');
         setPubMsg(`${dryRun ? '[테스트] ' : ''}발행 요청 완료! GitHub Actions에서 ${count}편 처리 중...`);
-        setPubLogUrl(`https://github.com/${data.repo || 'mymiryu-commits/wp-auto'}/actions/workflows/publish.yml`);
+        setPubLogUrl(`https://github.com/${process.env.NEXT_PUBLIC_GITHUB_REPO || 'planxs-ai/wp-auto'}/actions/workflows/publish.yml`);
       } else {
         setPubStatus('error');
-        setPubMsg(data.error || '요청 실패');
+        setPubMsg(data.error || data.guide || '요청 실패');
       }
     } catch (err) {
       setPubStatus('error');
