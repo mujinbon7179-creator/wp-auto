@@ -89,7 +89,7 @@ class KeywordManager:
             json.dump(self.used, f, ensure_ascii=False, indent=2)
 
     def select(self, count=5, pipeline="autoblog", niche="", kw_mix=None):
-        """미사용 키워드 중 count개 선택 (niche로 카테고리 필터링)"""
+        """미사용 키워드 중 count개 선택 (niche로 카테고리 필터링). 소진 시 자동 재활용."""
         pool = self.keywords.get("keywords", [])
         available = [
             kw for kw in pool
@@ -100,6 +100,19 @@ class KeywordManager:
 
         if niche:
             log.info(f"  니치 필터: '{niche}' -> {len(available)}개 키워드")
+
+        # 키워드 소진 시 자동 재활용: used 목록 초기화 후 재시도
+        if len(available) == 0 and len(pool) > 0:
+            pipeline_pool = [kw for kw in pool
+                            if kw.get("pipeline", "autoblog") == pipeline
+                            and (not niche or kw.get("category", "") == niche)]
+            if pipeline_pool:
+                log.info(f"♻️ 키워드 전량 소진 → used 목록 초기화 (재활용 {len(pipeline_pool)}개)")
+                # 해당 파이프라인/니치의 키워드만 used에서 제거
+                recycle_kws = {kw.get("keyword") for kw in pipeline_pool}
+                self.used = [u for u in self.used if u not in recycle_kws]
+                self._save_used()
+                available = pipeline_pool
 
         if len(available) < count:
             log.warning(f"가용 키워드 {len(available)}개 (요청 {count}개)")
