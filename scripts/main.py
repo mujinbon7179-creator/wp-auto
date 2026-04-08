@@ -3494,7 +3494,11 @@ def _get_all_active_sites():
             headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
             timeout=10
         )
-        return resp.json() or []
+        data = resp.json()
+        if not isinstance(data, list):
+            log.warning(f"sites 테이블 응답이 리스트가 아님: {type(data).__name__}")
+            return []
+        return [s for s in data if isinstance(s, dict)] or []
     except Exception:
         return []
 
